@@ -4,7 +4,7 @@ Drop HTML or Word (.docx) specs, edit them, and download one client documentatio
 
 ## Use it online
 
-Push to GitHub and Render deploys the latest `main` automatically. Open the Render URL in a browser — no Python install, no zip, no `.bat` file.
+The app lives at **[github.com/davo1100/pack-builder](https://github.com/davo1100/pack-builder)**. Connect that repo in Render (New → Blueprint) so every push to `main` goes live. Colleagues open the Render URL in a browser — no Python install, no zip, no `.bat` file.
 
 Dropped files are sent to the server for that convert/build request, processed in memory, and discarded. Nothing is kept. The HTML you download is still what you send to clients.
 

@@ -3,9 +3,10 @@ services:
     name: pack-builder
     runtime: python
     plan: free
+    branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: python studio.py
-    autoDeploy: true
+    autoDeployTrigger: commit
     healthCheckPath: /studio.html
     envVars:
       - key: PYTHON_VERSION
