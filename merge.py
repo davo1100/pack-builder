@@ -720,6 +720,174 @@ def detect_draft(html: str) -> bool:
     return bool(re.search(r"badge-draft|status-draft|>Draft<", html))
 
 
+CHAPTER_NAV_STYLE = "border:0;margin-top:28px;justify-content:space-between"
+PACK_PLACEHOLDER = re.compile(
+    r"select a page on the left|add a blank page on the left|drop html, word, or powerpoint",
+    re.I,
+)
+
+
+def is_built_pack(html: str) -> bool:
+    if not html:
+        return False
+    if 'class="site-header"' not in html and "class='site-header'" not in html:
+        return False
+    return bool(re.search(r"<section\b[^>]*\bchapter\b", html, re.I))
+
+
+def _attr(html: str, name: str) -> str:
+    match = re.search(rf'\b{name}="([^"]*)"', html, re.I)
+    return html_lib.unescape(match.group(1)) if match else ""
+
+
+def _inner_text(html: str, pattern: str) -> str:
+    match = re.search(pattern, html, re.I)
+    return strip_tags(match.group(1)) if match else ""
+
+
+def settings_from_pack(html: str, filename: str = "documentation.html") -> dict:
+    logo_src = ""
+    logo_alt = ""
+    logo = re.search(
+        r'<a class="brand-lockup"[^>]*>\s*<img\b([^>]+)>',
+        html,
+        re.I,
+    )
+    if logo:
+        logo_src = _attr(logo.group(1), "src")
+        logo_alt = _attr(logo.group(1), "alt")
+    theme = {}
+    root = re.search(r":root\s*\{([^}]+)\}", html)
+    if root:
+        block = root.group(1)
+        for key, var_name in THEME_VARS.items():
+            found = re.search(rf"{re.escape(var_name)}:\s*([^;]+);", block)
+            if not found:
+                continue
+            value = _safe_theme_value(key, found.group(1).strip())
+            if value:
+                theme[key] = value
+    return {
+        "page_title": _inner_text(html, r"<title>([\s\S]*?)</title>")
+        or Settings.page_title,
+        "header_doc": _inner_text(html, r'<span class="header-doc">([\s\S]*?)</span>')
+        or Settings.header_doc,
+        "logo_url": logo_src or Settings.logo_url,
+        "logo_alt": logo_alt or Settings.logo_alt,
+        "confidential": bool(re.search(r'class="confidential"', html)),
+        "footer": _inner_text(html, r'<p class="site-footer">([\s\S]*?)</p>')
+        or Settings.footer,
+        "output_filename": Path(filename).name or "documentation.html",
+        "theme": theme,
+    }
+
+
+def _strip_chapter_nav(body: str) -> str:
+    pos = body.rfind(CHAPTER_NAV_STYLE)
+    if pos == -1:
+        return body.strip()
+    start = body.rfind("<div", 0, pos)
+    if start == -1:
+        return body.strip()
+    return (body[:start] + body[matching_div_end(body, start) :]).strip()
+
+
+def _clean_imported_body(body: str) -> str:
+    body = re.sub(r"\scontenteditable(?:=([\"'][^\"']*[\"']))?", "", body, flags=re.I)
+    body = re.sub(r"\sdata-layout-block(?:=([\"'][^\"']*[\"']))?", "", body, flags=re.I)
+    body = re.sub(r"\sdata-protected(?:=([\"'][^\"']*[\"']))?", "", body, flags=re.I)
+    body = re.sub(r"\sdata-plain(?:=([\"'][^\"']*[\"']))?", "", body, flags=re.I)
+    body = re.sub(r'\sdata-lock-label="[^"]*"', "", body, flags=re.I)
+    body = re.sub(r'<p class="site-footer">[\s\S]*?</p>', "", body, flags=re.I)
+    return body.strip()
+
+
+def _is_placeholder_overview(body: str) -> bool:
+    text = re.sub(r"\s+", " ", strip_tags(body)).strip()
+    return not text or bool(PACK_PLACEHOLDER.search(text))
+
+
+def _pack_stem(title: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9]+", "_", title or "").strip("_")
+    return (stem[:72] or "Page")
+
+
+def _unique_pack_filename(num: str, title: str, used: set[str]) -> str:
+    stem = _pack_stem(title)
+    name = f"{num}_{stem}.html"
+    extra = 2
+    while name.lower() in used:
+        name = f"{num}_{stem}_{extra}.html"
+        extra += 1
+    used.add(name.lower())
+    return name
+
+
+def split_built_pack(html: str, filename: str = "documentation.html") -> tuple[list[Doc], dict]:
+    settings = settings_from_pack(html, filename)
+    docs: list[Doc] = []
+    used_names: set[str] = set()
+    used_nums: set[str] = set()
+    pos = 0
+    while True:
+        start = _find_tag_open(html, pos, "section")
+        if start == -1:
+            break
+        gt = html.find(">", start)
+        if gt == -1:
+            break
+        open_tag = html[start : gt + 1]
+        if not re.search(r'\bclass="[^"]*\bchapter\b', open_tag, re.I):
+            pos = start + 8
+            continue
+        end = matching_tag_end(html, start, "section")
+        inner = html[gt + 1 : end - len("</section>")].strip()
+        inner = _clean_imported_body(_strip_chapter_nav(inner))
+        section_id = _attr(open_tag, "id")
+        role = "overview" if section_id == "overview" else "chapter"
+        num_match = re.fullmatch(r"flow-(\d{1,2})", section_id or "")
+        num = "00" if role == "overview" else (num_match.group(1).zfill(2) if num_match else "")
+        title = detect_title(inner, filename)
+        if role == "overview":
+            if _is_placeholder_overview(inner):
+                inner = overview_hero(
+                    Settings(
+                        page_title=settings["page_title"],
+                        header_doc=settings["header_doc"],
+                    ),
+                    0,
+                )
+            title = "Contents"
+            num = "00"
+            name = _unique_pack_filename(num, "Contents", used_names)
+        else:
+            if not title or title == Path(filename).stem.replace("_", " "):
+                title = "New page"
+            if not num or num in used_nums:
+                seq = 1
+                while f"{seq:02d}" in used_nums:
+                    seq += 1
+                num = f"{seq:02d}"
+            name = _unique_pack_filename(num, title, used_names)
+        used_nums.add(num)
+        docs.append(
+            Doc(
+                filename=name,
+                title=decode_entities(title),
+                role=role,
+                include=True,
+                draft=detect_draft(inner),
+                num=num,
+                body=undouble_amp(sanitize_code_blocks(inner)),
+                id=section_id or "",
+            )
+        )
+        pos = end
+    if not docs:
+        raise ValueError("That pack file has no pages to edit")
+    return docs, settings
+
+
 def ingest_html(filename: str, raw: str, asset_dir: str | Path | None = None, images: dict | None = None) -> Doc:
     return ingest_file(filename, raw=raw, asset_dir=asset_dir, images=images)
 
@@ -774,6 +942,25 @@ def ingest_file(
         num=detect_num(name),
         body=body,
     )
+
+
+def ingest_upload(
+    filename: str,
+    raw: str | None = None,
+    data: bytes | None = None,
+    asset_dir: str | Path | None = None,
+    images: dict | None = None,
+) -> tuple[list[Doc], dict | None]:
+    name = Path(filename).name
+    from slides import is_slides_name
+    from word import is_word_name
+
+    if is_word_name(name) or is_slides_name(name):
+        return [ingest_file(name, data=data, asset_dir=asset_dir, images=images)], None
+    html = raw or ""
+    if is_built_pack(html):
+        return split_built_pack(html, name)
+    return [ingest_file(name, raw=html, asset_dir=asset_dir, images=images)], None
 
 
 def assign_ids(docs: list[Doc]) -> None:

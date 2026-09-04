@@ -122,6 +122,52 @@ function themeOverrideCss() {
   .content { max-width: ${t.content_max_width}; }`;
 }
 
+function toColorInput(value) {
+  const raw = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
+  if (/^#[0-9a-fA-F]{3}$/.test(raw)) {
+    return `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`;
+  }
+  return "";
+}
+
+function applyIncomingSettings(settings) {
+  if (!settings || typeof settings !== "object") return;
+  if (settings.page_title) els.pageTitle.value = settings.page_title;
+  if (settings.header_doc) els.headerDoc.value = settings.header_doc;
+  if (settings.logo_url) els.logoUrl.value = settings.logo_url;
+  if (settings.logo_alt) els.logoAlt.value = settings.logo_alt;
+  if ("confidential" in settings) els.confidential.checked = Boolean(settings.confidential);
+  if (settings.footer) els.footer.value = settings.footer;
+  if (settings.output_filename) els.outputFilename.value = settings.output_filename;
+  const theme = settings.theme || {};
+  const colors = {
+    magenta: "theme-magenta",
+    cream: "theme-cream",
+    olive: "theme-olive",
+    charcoal: "theme-charcoal",
+    violet: "theme-violet",
+    taupe: "theme-taupe",
+    white: "theme-white",
+    peach: "theme-peach",
+  };
+  for (const [key, id] of Object.entries(colors)) {
+    const hex = toColorInput(theme[key]);
+    if (hex) document.getElementById(id).value = hex;
+  }
+  if (theme.font_body) document.getElementById("theme-font").value = theme.font_body;
+  if (theme.content_max_width) {
+    document.getElementById("theme-content-width").value = String(theme.content_max_width).replace(/px$/i, "");
+  }
+  if (theme.sidebar_width) {
+    document.getElementById("theme-sidebar-width").value = String(theme.sidebar_width).replace(/px$/i, "");
+  }
+  if (theme.radius) {
+    document.getElementById("theme-radius").value = String(theme.radius).replace(/px$/i, "");
+  }
+  PackEditor.applyTheme(themeOverrideCss());
+}
+
 function settingsPayload() {
   return {
     page_title: els.pageTitle.value.trim(),
@@ -559,6 +605,7 @@ async function ingestFiles(fileList) {
     setStatus(data.error || "Could not read files", "error");
     return;
   }
+  applyIncomingSettings(data.settings);
   await mergeIncoming(data.docs || []);
   setStatus(`${state.docs.length} page${state.docs.length === 1 ? "" : "s"} loaded`, "ok");
 }
@@ -614,8 +661,14 @@ els.btnImportLocal.addEventListener("click", async () => {
   const docs = [];
   for (const file of files) {
     const res = await fetch(`/api/local-file?folder=${encodeURIComponent(file.folder)}&name=${encodeURIComponent(file.name)}`);
-    const doc = await res.json();
-    if (res.ok) docs.push(doc);
+    const data = await res.json();
+    if (!res.ok) continue;
+    if (Array.isArray(data.docs)) {
+      docs.push(...data.docs);
+      applyIncomingSettings(data.settings);
+    } else {
+      docs.push(data);
+    }
   }
   await mergeIncoming(docs);
   setStatus(`Imported ${docs.length} file${docs.length === 1 ? "" : "s"}`, "ok");

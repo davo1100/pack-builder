@@ -1,6 +1,6 @@
 # Pack Builder
 
-Drop HTML, Word (.docx), or PowerPoint (.pptx) specs, edit them, and download one client documentation file.
+Drop HTML, Word (.docx), or PowerPoint (.pptx) specs, edit them, and download one client documentation file. A downloaded pack can be dropped back in to keep editing.
 
 ## Use it online
 

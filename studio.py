@@ -10,7 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from merge import ROOT, build_from_payload, ingest_html, ingest_file, load_client_css, docs_from_payload, settings_from_payload, sync_overview
+from merge import ROOT, build_from_payload, ingest_upload, load_client_css, docs_from_payload, settings_from_payload, sync_overview
 from slides import is_slides_name
 from word import is_word_name
 
@@ -114,6 +114,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 images = data.get("images") or {}
                 asset_dir = None if hosted() else (data.get("asset_dir") or None)
                 docs = []
+                settings = None
                 for item in data.get("files") or []:
                     name = item.get("filename") or "document.html"
                     item_dir = None if hosted() else (item.get("asset_dir") or asset_dir)
@@ -133,30 +134,28 @@ class StudioHandler(SimpleHTTPRequestHandler):
                             or ""
                         )
                         binary = base64.b64decode(raw_b64) if raw_b64 else b""
-                        docs.append(
-                            _doc_to_payload(
-                                ingest_file(
-                                    name,
-                                    data=binary,
-                                    asset_dir=item_dir,
-                                    images=images,
-                                )
-                            )
+                        batch, pack_settings = ingest_upload(
+                            name,
+                            data=binary,
+                            asset_dir=item_dir,
+                            images=images,
                         )
                     else:
-                        docs.append(
-                            _doc_to_payload(
-                                ingest_html(
-                                    name,
-                                    item.get("html") or "",
-                                    asset_dir=item_dir,
-                                    images=images,
-                                )
-                            )
+                        batch, pack_settings = ingest_upload(
+                            name,
+                            raw=item.get("html") or "",
+                            asset_dir=item_dir,
+                            images=images,
                         )
+                    docs.extend(_doc_to_payload(doc) for doc in batch)
+                    if pack_settings:
+                        settings = pack_settings
             except Exception as exc:
                 return self._send_json({"error": str(exc)}, 400)
-            return self._send_json({"docs": docs})
+            payload = {"docs": docs}
+            if settings:
+                payload["settings"] = settings
+            return self._send_json(payload)
 
         if parsed.path == "/api/sync-overview":
             try:
@@ -235,9 +234,20 @@ def _read_local_file(folder: str, name: str) -> dict:
     if not path.is_file():
         raise FileNotFoundError
     if is_word_name(name) or is_slides_name(name):
-        return _doc_to_payload(ingest_file(name, data=path.read_bytes(), asset_dir=path.parent))
-    raw = path.read_text(encoding="utf-8")
-    return _doc_to_payload(ingest_html(name, raw, asset_dir=path.parent))
+        batch, settings = ingest_upload(name, data=path.read_bytes(), asset_dir=path.parent)
+    else:
+        batch, settings = ingest_upload(
+            name,
+            raw=path.read_text(encoding="utf-8"),
+            asset_dir=path.parent,
+        )
+    docs = [_doc_to_payload(doc) for doc in batch]
+    if settings or len(docs) != 1:
+        payload = {"docs": docs}
+        if settings:
+            payload["settings"] = settings
+        return payload
+    return docs[0]
 
 
 def main() -> None:
