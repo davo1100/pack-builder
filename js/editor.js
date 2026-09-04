@@ -603,6 +603,183 @@ const PackEditor = {
     return el.tagName.toLowerCase();
   },
 
+  listSections() {
+    const root = this.root();
+    if (!root) return [];
+    const out = [];
+    root.querySelectorAll(".content-card").forEach((card) => {
+      const h2 = card.querySelector(":scope > h2");
+      if (h2) {
+        if (!h2.id) h2.id = "sec-" + Math.random().toString(36).slice(2, 8);
+        out.push({ el: h2, level: 2, num: this._headingNum(h2), title: this._headingTitle(h2) });
+      }
+      card.querySelectorAll(":scope h3").forEach((h3) => {
+        if (!h3.id) h3.id = "sec-" + Math.random().toString(36).slice(2, 8);
+        out.push({ el: h3, level: 3, num: this._headingNum(h3), title: this._headingTitle(h3) });
+      });
+    });
+    return out;
+  },
+
+  setSectionNumber(index, num) {
+    const item = this.listSections()[index];
+    if (!item || !String(num || "").trim()) return false;
+    this._applyNumber(item.el, String(num).trim());
+    this.rebuildToc();
+    this._prepare();
+    this._changed();
+    return true;
+  },
+
+  renumberSections() {
+    let n = 0;
+    this.listSections().forEach((item) => {
+      if (item.level === 2) {
+        n += 1;
+        this._h3Count = 0;
+        this._applyNumber(item.el, String(n));
+      } else {
+        this._h3Count = (this._h3Count || 0) + 1;
+        this._applyNumber(item.el, `${n || 1}.${this._h3Count}`);
+      }
+    });
+    this.rebuildToc();
+    this._prepare();
+    this._changed();
+  },
+
+  promoteSection(index) {
+    const item = this.listSections()[index];
+    if (!item || item.level !== 3) return false;
+    const doc = this.doc();
+    const h3 = item.el;
+    const card = h3.closest(".content-card");
+    if (!doc || !card) return false;
+    const newCard = doc.createElement("div");
+    newCard.className = "content-card";
+    const h2 = doc.createElement("h2");
+    h2.id = h3.id;
+    h2.innerHTML = h3.innerHTML;
+    newCard.appendChild(h2);
+    let node = h3.nextSibling;
+    h3.remove();
+    while (node) {
+      const next = node.nextSibling;
+      if (node.nodeType === 1 && node.matches("h2, h3")) break;
+      newCard.appendChild(node);
+      node = next;
+    }
+    card.after(newCard);
+    this.rebuildToc();
+    this._prepare();
+    this._select(newCard);
+    this._changed();
+    return true;
+  },
+
+  demoteSection(index) {
+    const items = this.listSections();
+    const item = items[index];
+    if (!item || item.level !== 2) return false;
+    const card = item.el.closest(".content-card");
+    const prev = card?.previousElementSibling;
+    if (!prev?.matches(".content-card")) return false;
+    const h3 = this.doc().createElement("h3");
+    h3.id = item.el.id;
+    h3.innerHTML = item.el.innerHTML;
+    h3.querySelector(".pack-icon")?.remove();
+    item.el.remove();
+    prev.appendChild(h3);
+    while (card.firstChild) prev.appendChild(card.firstChild);
+    card.remove();
+    this.rebuildToc();
+    this._prepare();
+    this._select(prev);
+    this._changed();
+    return true;
+  },
+
+  rebuildToc() {
+    const root = this.root();
+    const toc = root?.querySelector(".toc-card");
+    if (!root || !toc) return;
+    const items = this.listSections();
+    const head = toc.querySelector("h3")?.outerHTML || "<h3>Table of Contents</h3>";
+    if (!items.length) {
+      toc.remove();
+      return;
+    }
+    const rows = [];
+    let current = null;
+    let nested = [];
+    const flush = () => {
+      if (!current) return;
+      const nest = nested.length ? `\n<ul>\n${nested.join("\n")}\n</ul>` : "";
+      const id = current.el.id || "";
+      rows.push(`<li><a href="#${id}">${this._escape(this._headingPlain(current.el))}</a>${nest}</li>`);
+      nested = [];
+    };
+    items.forEach((item) => {
+      if (item.level === 2) {
+        flush();
+        current = item;
+      } else if (current) {
+        const id = item.el.id || "";
+        nested.push(`<li><a href="#${id}">${this._escape(this._headingPlain(item.el))}</a></li>`);
+      }
+    });
+    flush();
+    toc.innerHTML = `${head}\n<ul>\n${rows.join("\n")}\n</ul>`;
+  },
+
+  _headingPlain(el) {
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll(".pack-icon, svg").forEach((node) => node.remove());
+    return (clone.textContent || "").replace(/\s+/g, " ").trim();
+  },
+
+  _headingNum(el) {
+    const badge = el.querySelector(".step-badge");
+    if (badge) return (badge.textContent || "").trim();
+    const match = this._headingPlain(el).match(/^(\d+(?:\.\d+)*)[.)]?\s+/);
+    return match ? match[1] : "";
+  },
+
+  _headingTitle(el) {
+    const badge = el.querySelector(".step-badge");
+    if (badge) {
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll(".pack-icon, .step-badge, svg").forEach((node) => node.remove());
+      return (clone.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    return this._headingPlain(el).replace(/^\d+(?:\.\d+)*[.)]?\s+/, "");
+  },
+
+  _applyNumber(el, num) {
+    const title = this._headingTitle(el);
+    const badge = el.querySelector(".step-badge");
+    if (badge) {
+      badge.textContent = num;
+      return;
+    }
+    const icon = el.querySelector(".pack-icon");
+    const keep = icon ? icon.cloneNode(true) : null;
+    el.textContent = "";
+    if (keep) {
+      el.appendChild(keep);
+      el.appendChild(this.doc().createTextNode(" "));
+    }
+    el.appendChild(this.doc().createTextNode(`${num}. ${title}`));
+  },
+
+  _escape(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  },
+
   _changed() {
     this.onChange();
   },

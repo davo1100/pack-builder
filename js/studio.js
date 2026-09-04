@@ -719,9 +719,41 @@ function setToolbarLocked(locked) {
   els.editorHint.classList.toggle("locked", locked);
 }
 
+function renderSectionOutline() {
+  const rail = document.getElementById("section-rail");
+  const list = document.getElementById("section-list");
+  if (!rail || !list) return;
+  if (document.activeElement?.matches?.("[data-sec-num]")) return;
+  const sections = PackEditor.listSections();
+  if (state.tab !== "edit" || !sections.length) {
+    rail.hidden = true;
+    return;
+  }
+  rail.hidden = false;
+  const count = document.getElementById("section-count");
+  if (count) count.textContent = `(${sections.length})`;
+  const firstH2 = sections.findIndex((item) => item.level === 2);
+  list.innerHTML = sections
+    .map((item, index) => {
+      const demote = item.level === 2 && index !== firstH2
+        ? `<button type="button" data-sec-act="demote" data-index="${index}">Make H3</button>`
+        : "";
+      const promote = item.level === 3
+        ? `<button type="button" data-sec-act="promote" data-index="${index}">Make H2</button>`
+        : "";
+      return `<div class="section-row" data-level="${item.level}">
+        <input data-sec-num data-index="${index}" value="${escapeAttr(item.num)}" aria-label="Section number">
+        <span class="sec-title">${escapeHtml(item.title)}</span>
+        ${demote}${promote}
+      </div>`;
+    })
+    .join("");
+}
+
 PackEditor.bind(els.editor, {
   onChange() {
     schedulePreview();
+    renderSectionOutline();
   },
   onSelect(info) {
     setToolbarLocked(Boolean(info.plain || info.protected));
@@ -735,6 +767,7 @@ PackEditor.bind(els.editor, {
         button.classList.toggle("is-active", button.dataset.value === tone);
       });
     }
+    renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
     } else if (header) {
@@ -916,6 +949,8 @@ function loadEditor() {
   if (!doc) {
     PackEditor.load("<p>Select a page on the left to edit it.</p>", "", "");
     els.editorHint.textContent = "Select a page on the left to edit it.";
+    const rail = document.getElementById("section-rail");
+    if (rail) rail.hidden = true;
     return;
   }
   els.editorHint.textContent = doc.role === "overview"
@@ -951,6 +986,26 @@ async function downloadPack() {
 
 els.btnPreview.addEventListener("click", () => schedulePreview(true));
 els.btnDownload.addEventListener("click", () => downloadPack());
+
+document.getElementById("btn-renumber-sections").addEventListener("click", () => {
+  PackEditor.renumberSections();
+  setStatus("Section numbers updated", "ok");
+});
+
+document.getElementById("section-list").addEventListener("change", (event) => {
+  const input = event.target.closest("[data-sec-num]");
+  if (!input) return;
+  PackEditor.setSectionNumber(Number(input.dataset.index), input.value);
+  setStatus("Section number updated", "ok");
+});
+
+document.getElementById("section-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sec-act]");
+  if (!button) return;
+  const index = Number(button.dataset.index);
+  if (button.dataset.secAct === "promote") PackEditor.promoteSection(index);
+  if (button.dataset.secAct === "demote") PackEditor.demoteSection(index);
+});
 
 fetch("css/styles.css")
   .then((res) => res.text())

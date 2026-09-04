@@ -181,6 +181,16 @@
           </span>
         </div>
         <div class="editor-hint" id="editor-hint">Select a page, then click text to edit. Code examples and tables stay plain text so their structure is preserved.</div>
+        <details class="section-rail" id="section-rail" hidden>
+          <summary>
+            <span class="toolbar-label">Page sections</span>
+            <span id="section-count" class="section-count"></span>
+          </summary>
+          <div class="section-rail-actions">
+            <button type="button" id="btn-renumber-sections">Renumber 1, 2, 3…</button>
+          </div>
+          <div id="section-list" class="section-list"></div>
+        </details>
         <iframe id="editor" title="Page editor"></iframe>
       </div>
     </section>

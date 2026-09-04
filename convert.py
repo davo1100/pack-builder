@@ -30,6 +30,7 @@ API_LABEL_RE = re.compile(
     re.I,
 )
 HTTP_RE = re.compile(r"^\s*(GET|POST|PUT|PATCH|DELETE|HEAD)\s+(\S+)", re.I)
+HEADING_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)[.)]?\s+")
 METHOD_BADGE = {
     "GET": "badge-get",
     "POST": "badge-post",
@@ -75,6 +76,15 @@ _HTML_TAG_RE = re.compile(
     r"details|summary|colgroup|col)(?:\s[^>]*)?/?>",
     re.I,
 )
+
+
+def strip_heading_num(text: str) -> str:
+    return HEADING_NUM_RE.sub("", (text or "").strip(), count=1).strip()
+
+
+def heading_num_prefix(text: str) -> str:
+    match = HEADING_NUM_RE.match((text or "").strip())
+    return match.group(1) if match else ""
 
 
 def decode_entities(text: str) -> str:
@@ -359,14 +369,17 @@ class Converter:
         return any(token in haystack for token in CHROME_IMG)
 
     def numbered(self, text: str, level: int) -> str:
-        cleaned = re.sub(r"\s+", " ", text).strip()
-        if re.match(r"^\d+([.)]\d+)*[.)]?\s", cleaned):
-            return cleaned
+        cleaned = strip_heading_num(re.sub(r"\s+", " ", text).strip()) or re.sub(r"\s+", " ", text).strip()
         if level == 2:
             return f"{self.card_n}. {cleaned}"
         if level == 3:
             return f"{self.card_n}.{self.h3_n} {cleaned}"
         return cleaned
+
+    def as_heading(self, tag: str, text: str) -> dict:
+        node = {"tag": tag, "attrs": [], "children": [text]}
+        node["_id"] = self.slug(text)
+        return node
 
     def find_tag(self, node: dict, tag: str):
         if is_el(node, tag):
@@ -1134,33 +1147,62 @@ class Converter:
         flat = self.flatten_top(nodes)
         sections: list[dict] = []
         current = {"title": "", "nodes": [], "step": ""}
+        last_top = 0
+        seq = 0
+
+        def close() -> None:
+            if current["title"] or current["nodes"]:
+                sections.append(current)
+
+        def open_section(title: str, step: str = "") -> None:
+            nonlocal current, last_top, seq
+            close()
+            seq += 1
+            prefix = heading_num_prefix(title) or str(step or "")
+            top = 0
+            if prefix:
+                try:
+                    top = int(prefix.split(".", 1)[0])
+                except ValueError:
+                    top = 0
+            last_top = max(last_top, top, seq)
+            current = {"title": title, "nodes": [], "step": step}
+
         for node in flat:
             step = self.step_heading(node) if is_el(node) else None
             if is_el(node) and node["tag"] in {"h1", "h2"}:
-                if current["title"] or current["nodes"]:
-                    sections.append(current)
-                current = {"title": re.sub(r"\s+", " ", text_of(node)).strip(), "nodes": [], "step": ""}
+                open_section(re.sub(r"\s+", " ", text_of(node)).strip())
                 continue
             if step:
                 number, title = step
-                if current["title"] or current["nodes"]:
-                    sections.append(current)
-                current = {"title": title, "nodes": [], "step": number}
+                try:
+                    start = int(str(number).split(".", 1)[0])
+                except ValueError:
+                    start = 0
+                restart = bool(current["title"]) and last_top > 1 and start and start <= last_top and (
+                    start < last_top or start == 1
+                )
+                if restart:
+                    current["nodes"].append(self.as_heading("h3", title))
+                    continue
+                open_section(title, str(number))
                 continue
             current["nodes"].append(node)
-        if current["title"] or current["nodes"]:
-            sections.append(current)
+        close()
         prepared = []
         for index, section in enumerate(sections, 1):
             title = section["title"]
             if not title:
                 title = "Overview" if index == 1 else f"Section {index}"
             section["title"] = title
-            section["id"] = self.slug(title)
+            section["id"] = self.slug(strip_heading_num(title) or title)
             section["number"] = index
             for node in section["nodes"]:
                 if is_el(node, "h3"):
-                    node["_id"] = self.slug(re.sub(r"\s+", " ", text_of(node)).strip())
+                    node["_id"] = node.get("_id") or self.slug(
+                        strip_heading_num(re.sub(r"\s+", " ", text_of(node)).strip())
+                        or re.sub(r"\s+", " ", text_of(node)).strip()
+                    )
             prepared.append(section)
         return prepared
 
@@ -1171,18 +1213,16 @@ class Converter:
         for section in sections:
             subs = []
             h3 = 0
+            plain_title = strip_heading_num(section["title"]) or section["title"]
             for node in section["nodes"]:
                 if is_el(node, "h3"):
                     h3 += 1
                     text = re.sub(r"\s+", " ", text_of(node)).strip()
-                    label = text if re.match(r"^\d+", text) else f"{section['number']}.{h3} {text}"
+                    label = f"{section['number']}.{h3} {strip_heading_num(text) or text}"
                     subs.append(f'<li><a href="#{node["_id"]}">{html_lib.escape(label)}</a></li>')
             nested = f"<ul>\n{''.join(subs)}\n</ul>" if subs else ""
             self.card_n = section["number"]
-            if section.get("step"):
-                label = f'{section["step"]}. {section["title"]}'
-            else:
-                label = self.numbered(section["title"], 2)
+            label = f"{section['number']}. {plain_title}"
             items.append(
                 f'<li><a href="#{section["id"]}">{html_lib.escape(label)}</a>{nested}</li>'
             )
@@ -1216,11 +1256,12 @@ class Converter:
         for section in sections:
             self.card_n = section["number"]
             self.h3_n = 0
+            plain = strip_heading_num(section["title"]) or section["title"]
             if section.get("step"):
                 heading = (
                     f'<h2 id="{section["id"]}">'
-                    f'<span class="step-badge">{html_lib.escape(str(section["step"]))}</span> '
-                    f"{html_lib.escape(section['title'])}</h2>"
+                    f'<span class="step-badge">{html_lib.escape(str(section["number"]))}</span> '
+                    f"{html_lib.escape(plain)}</h2>"
                 )
             else:
                 heading = (

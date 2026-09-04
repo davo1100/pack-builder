@@ -594,6 +594,118 @@ h2.section:first-child {
   border-bottom: 1px solid var(--border);
 }
 
+.section-rail {
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+}
+
+.section-rail[hidden] {
+  display: none !important;
+}
+
+.section-rail > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  user-select: none;
+}
+
+.section-rail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.section-rail > summary::before {
+  content: "▸";
+  color: var(--taupe);
+  font-size: 0.7rem;
+  width: 12px;
+}
+
+.section-rail[open] > summary::before {
+  content: "▾";
+}
+
+.section-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--taupe);
+}
+
+.section-rail-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 8px;
+}
+
+.section-rail-actions button {
+  border: 1px solid var(--border);
+  background: var(--lavender);
+  color: var(--charcoal);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow: auto;
+  padding: 0 12px 10px;
+}
+
+.section-row {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.section-row[data-level="3"] {
+  padding-left: 16px;
+  grid-template-columns: 4.6em minmax(0, 1fr) auto;
+}
+
+.section-row input[data-sec-num] {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--charcoal);
+}
+
+.section-row .sec-title {
+  font-size: 0.78rem;
+  color: var(--olive);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.section-row button {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--charcoal);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .empty {
   padding: 48px 24px;
   text-align: center;
