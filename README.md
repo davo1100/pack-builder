@@ -1,6 +1,6 @@
 # Pack Builder
 
-Drop HTML or Word (.docx) specs, edit them, and download one client documentation file.
+Drop HTML, Word (.docx), or PowerPoint (.pptx) specs, edit them, and download one client documentation file.
 
 ## Use it online
 
@@ -8,13 +8,13 @@ The app lives at **[github.com/davo1100/pack-builder](https://github.com/davo110
 
 Dropped files are sent to the server for that convert/build request, processed in memory, and discarded. Nothing is kept. The HTML you download is still what you send to clients.
 
-Old `.doc` files are not converted in the cloud (no Microsoft Word). Save them as `.docx` first.
+Old `.doc` and `.ppt` files are not converted in the cloud (no Microsoft Office). Save them as `.docx` or `.pptx` first.
 
 ## Run it on your computer
 
 1. If Python is missing, install Python 3 from https://www.python.org/downloads/ (free). On the **first installer screen**, tick **Add python.exe to PATH**, then click **Install Now**.
 2. Double-click `Start Pack Builder.bat`. A command window stays open and the studio opens at http://127.0.0.1:8787/studio.html.
-3. Drop HTML or Word files (and attachments for diagrams), edit, then download the pack.
+3. Drop HTML, Word, or PowerPoint files (and attachments for diagrams), edit, then download the pack.
 
 Leave the command window open while you work. Close it to stop.
 

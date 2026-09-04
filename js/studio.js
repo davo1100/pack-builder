@@ -20,7 +20,10 @@ const els = {
   workspaceEdit: document.getElementById("workspace-edit"),
   btnPreview: document.getElementById("btn-preview"),
   btnDownload: document.getElementById("btn-download"),
+  btnAddPage: document.getElementById("btn-add-page"),
   btnImportLocal: document.getElementById("btn-import-local"),
+  panelLeft: document.getElementById("panel-left"),
+  btnCollapseNav: document.getElementById("btn-collapse-nav"),
   pageTitle: document.getElementById("page-title"),
   headerDoc: document.getElementById("header-doc"),
   logoUrl: document.getElementById("logo-url"),
@@ -34,6 +37,29 @@ function setStatus(text, kind) {
   els.status.textContent = text || "";
   els.status.className = "status" + (kind ? " " + kind : "");
 }
+
+const NAV_COLLAPSED_KEY = "pack-builder-nav-collapsed";
+
+function navCollapsed() {
+  return document.querySelector(".studio-app")?.classList.contains("nav-collapsed");
+}
+
+function setNavCollapsed(collapsed) {
+  const app = document.querySelector(".studio-app");
+  if (!app || !els.btnCollapseNav) return;
+  app.classList.toggle("nav-collapsed", collapsed);
+  const label = collapsed ? "Show files panel" : "Hide files panel";
+  els.btnCollapseNav.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  els.btnCollapseNav.setAttribute("aria-label", label);
+  els.btnCollapseNav.title = label;
+  try {
+    localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch (_) {}
+}
+
+try {
+  if (localStorage.getItem(NAV_COLLAPSED_KEY) === "1") setNavCollapsed(true);
+} catch (_) {}
 
 IconLibrary.load().catch(() => {});
 
@@ -241,7 +267,7 @@ async function syncOverview(options) {
 
 function renderList() {
   if (!state.docs.length) {
-    els.fileList.innerHTML = '<p class="empty" style="padding:16px 0">No files yet.</p>';
+    els.fileList.innerHTML = '<p class="empty file-list-empty">No files yet. Add a blank page or drop files above.</p>';
     return;
   }
   els.fileList.innerHTML = state.docs
@@ -509,13 +535,17 @@ async function ingestFiles(fileList) {
       files.push({ filename: name, docx: await readAsBase64(file) });
       continue;
     }
+    if (/\.(pptx?|pptm|ppsx?|ppsm)$/i.test(name)) {
+      files.push({ filename: name, pptx: await readAsBase64(file) });
+      continue;
+    }
     if (/\.(png|jpe?g|gif|svg|webp)$/i.test(name)) {
       const data = await readAsDataURL(file);
       for (const key of imageKeys(file)) images[key] = data;
     }
   }
   if (!files.length) {
-    setStatus("No HTML or Word files found", "error");
+    setStatus("No HTML, Word, or PowerPoint files found", "error");
     return;
   }
   setStatus("Converting pages…");
@@ -555,6 +585,18 @@ els.dropzone.addEventListener("drop", async (event) => {
   const files = await filesFromDrop(event.dataTransfer);
   await ingestFiles(files);
 });
+
+if (els.btnCollapseNav) {
+  els.btnCollapseNav.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setNavCollapsed(!navCollapsed());
+  });
+}
+if (els.panelLeft) {
+  els.panelLeft.addEventListener("click", () => {
+    if (navCollapsed()) setNavCollapsed(false);
+  });
+}
 
 els.btnImportLocal.addEventListener("click", async () => {
   setStatus("Loading project files…");
@@ -690,12 +732,15 @@ document.addEventListener("click", (event) => {
 });
 
 document.getElementById("layout-toolbar").addEventListener("click", (event) => {
+  if (event.target.closest("#btn-insert-menu")) return;
   if (event.target.closest("#btn-edit-diagram")) {
+    closeInsertMenu();
     openDiagramEditor(true);
     return;
   }
   const insert = event.target.closest("button[data-insert]");
   if (insert) {
+    closeInsertMenu();
     if (insert.dataset.insert === "diagram") {
       openDiagramEditor(false);
       return;
@@ -715,6 +760,28 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
   }
   const ok = PackEditor.layout(button.dataset.layout, button.dataset.value || "");
   if (tableAction && !ok) setStatus("Click inside a table first, then add a row or column", "error");
+});
+
+function closeInsertMenu() {
+  const menu = document.getElementById("insert-menu");
+  const button = document.getElementById("btn-insert-menu");
+  if (!menu || !button) return;
+  menu.hidden = true;
+  button.setAttribute("aria-expanded", "false");
+}
+
+document.getElementById("btn-insert-menu").addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const menu = document.getElementById("insert-menu");
+  const open = menu.hidden;
+  menu.hidden = !open;
+  event.currentTarget.setAttribute("aria-expanded", String(open));
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".insert-menu")) return;
+  closeInsertMenu();
 });
 
 function setToolbarLocked(locked) {
@@ -763,6 +830,7 @@ PackEditor.bind(els.editor, {
   onSelect(info) {
     setToolbarLocked(Boolean(info.plain || info.protected));
     const isDiagram = info.label === "Diagram";
+    const isTable = info.label === "Table";
     const header = PackEditor.selected?.matches?.(".hero, .page-header") ? PackEditor.selected : null;
     const tones = document.getElementById("hero-tones");
     tones.hidden = !header;
@@ -779,9 +847,15 @@ PackEditor.bind(els.editor, {
     if (card && document.activeElement !== labelInput) {
       labelInput.value = PackEditor.cardLabel();
     }
+    const tableTools = document.getElementById("table-tools");
+    if (tableTools) tableTools.hidden = !isTable;
+    const diagramTools = document.getElementById("diagram-tools");
+    if (diagramTools) diagramTools.hidden = !isDiagram;
     renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+    } else if (isTable) {
+      els.editorHint.textContent = "Table selected. Add a row or column here, or edit the cells in the page.";
     } else if (header) {
       els.editorHint.textContent = "Header box selected. Pick a colour, then edit the title, description, and labels.";
     } else if (card) {
@@ -789,9 +863,9 @@ PackEditor.bind(els.editor, {
     } else if (info.plain || info.protected) {
       els.editorHint.textContent = `${info.label}: plain-text only. Structure is locked so the layout stays intact.`;
     } else if (PackEditor.selected?.matches?.(".content-card, .overview-section")) {
-      els.editorHint.textContent = "Section selected. Insert tables, icon cards, code, API boxes, and other blocks into this section. + Section adds a new section after it.";
+      els.editorHint.textContent = "Section selected. Use Add to page for tables, notes, diagrams, and other blocks.";
     } else if (PackEditor.selected) {
-      els.editorHint.textContent = `Selected ${info.label}. Use Layout to move it, or insert another block into this section.`;
+      els.editorHint.textContent = `Selected ${info.label}. Move, duplicate, or hide it here, or add another block.`;
     } else {
       const doc = docById(state.selected);
       els.editorHint.textContent = doc
@@ -877,7 +951,10 @@ document.addEventListener("keydown", (event) => {
 function schedulePreview(immediate) {
   clearTimeout(state.previewTimer);
   if (!state.docs.some((d) => d.include)) {
-    showPreviewHtml(emptyPreview("Include at least one page to preview the pack."));
+    const message = state.docs.length
+      ? "Include at least one page to preview the pack."
+      : "Add a blank page, or drop HTML, Word, or PowerPoint files, to start.";
+    showPreviewHtml(emptyPreview(message));
     els.btnDownload.disabled = true;
     return;
   }
@@ -918,7 +995,7 @@ function showPreviewHtml(html) {
 }
 
 function restorePreviewFrame() {
-  showPreviewHtml(state.lastHtml || emptyPreview("Drop HTML files or import from this project to start."));
+  showPreviewHtml(state.lastHtml || emptyPreview("Add a blank page, or drop HTML, Word, or PowerPoint files, to start."));
 }
 
 function bindPreviewLinks() {
@@ -951,6 +1028,75 @@ els.preview.addEventListener("load", () => {
   if (state.tab === "preview") revealPreviewSelection();
 });
 
+function blankPageBody() {
+  return `<header class="hero">
+<h1>New page</h1>
+<p>Start writing here.</p>
+</header>
+<div class="content-card">
+<h2>1. Overview</h2>
+<p>Add copy here.</p>
+</div>`;
+}
+
+function selectedDoc() {
+  const selected = docById(state.selected);
+  if (selected) return selected;
+  if (state.docs.length) {
+    state.selected = state.docs[0].id;
+    return state.docs[0];
+  }
+  return null;
+}
+
+function nextBlankPageMeta() {
+  const usedNums = new Set(
+    state.docs
+      .filter((doc) => doc.role !== "overview")
+      .map((doc) => chapterNum(doc.num))
+      .filter(Boolean)
+  );
+  let n = 1;
+  while (usedNums.has(String(n).padStart(2, "0"))) n += 1;
+  const num = String(n).padStart(2, "0");
+  const names = new Set(state.docs.map((doc) => doc.filename.toLowerCase()));
+  let filename = `${num}_Page.html`;
+  let extra = 2;
+  while (names.has(filename.toLowerCase())) {
+    filename = `${num}_Page_${extra}.html`;
+    extra += 1;
+  }
+  return { num, filename };
+}
+
+function addBlankPage() {
+  flushEditor();
+  const { num, filename } = nextBlankPageMeta();
+  const doc = {
+    id: uid(),
+    filename,
+    title: "New page",
+    role: "chapter",
+    include: true,
+    draft: false,
+    num,
+    body: blankPageBody(),
+  };
+  state.docs.push(doc);
+  pinOverviews();
+  state.selected = doc.id;
+  els.btnDownload.disabled = false;
+  renderList();
+  if (state.tab === "edit") loadEditor();
+  syncOverview({ skipFlush: true }).then(() => {
+    renderList();
+    if (state.tab === "edit") loadEditor();
+    schedulePreview();
+  });
+  setStatus("Added blank page", "ok");
+  return doc;
+}
+
 function flushEditor() {
   const doc = docById(state.selected);
   if (!doc || PackEditor.loadedId !== doc.id) return;
@@ -959,14 +1105,23 @@ function flushEditor() {
 }
 
 function loadEditor() {
-  const doc = docById(state.selected);
+  const doc = selectedDoc();
+  const rail = document.getElementById("section-rail");
+  const toolbar = document.getElementById("text-toolbar");
   if (!doc) {
-    PackEditor.load("<p>Select a page on the left to edit it.</p>", "", "");
-    els.editorHint.textContent = "Select a page on the left to edit it.";
-    const rail = document.getElementById("section-rail");
     if (rail) rail.hidden = true;
+    toolbar?.classList.add("is-idle");
+    els.editorHint.textContent = "Add a blank page on the left, or drop a file, to start editing.";
+    PackEditor.load(
+      "<p>Add a blank page on the left, or drop HTML, Word, or PowerPoint files to start.</p>",
+      state.clientCss,
+      themeOverrideCss(),
+      "",
+      false
+    );
     return;
   }
+  toolbar?.classList.remove("is-idle");
   els.editorHint.textContent = doc.role === "overview"
     ? "Contents is generated from included pages. Edit the intro and card summaries here; titles, numbers, and links stay in sync."
     : `Editing ${doc.filename}. Click into a section, then insert tables, icon cards, code, and other blocks inside it.`;
@@ -1000,6 +1155,7 @@ async function downloadPack() {
 
 els.btnPreview.addEventListener("click", () => schedulePreview(true));
 els.btnDownload.addEventListener("click", () => downloadPack());
+els.btnAddPage.addEventListener("click", () => addBlankPage());
 
 document.getElementById("btn-card-icon").addEventListener("click", async (event) => {
   event.preventDefault();
@@ -1038,9 +1194,16 @@ fetch("css/styles.css")
   .then((res) => res.text())
   .then((css) => {
     state.clientCss = css;
+    PackEditor.applyClientCss(css);
+    PackEditor.applyTheme(themeOverrideCss());
+    const tag = PackEditor.doc()?.getElementById("pack-client-css");
+    if (state.tab === "edit" && docById(state.selected) && tag && !tag.textContent.trim()) {
+      flushEditor();
+      loadEditor();
+    }
   })
   .catch(() => {});
 
-showPreviewHtml(emptyPreview("Drop HTML files or import from this project to start."));
+showPreviewHtml(emptyPreview("Add a blank page, or drop HTML, Word, or PowerPoint files, to start."));
 loadEditor();
 renderList();

@@ -128,7 +128,7 @@ def is_confluence(html: str) -> bool:
 
 
 def filename_title(filename: str) -> str:
-    stem = re.sub(r"\.(html|docx?)$", "", Path(filename).name, flags=re.I)
+    stem = re.sub(r"\.(html|docx?|pptx?|pptm|ppsx|ppsm|pps)$", "", Path(filename).name, flags=re.I)
     stem = re.sub(r"_\d{6,}$", "", stem)
     stem = re.sub(r"^\d+[_-]?", "", stem)
     stem = stem.replace("%27", "'").replace("-", " ").replace("_", " ")
@@ -408,6 +408,8 @@ class Converter:
             return True
         if node["tag"] == "br":
             return True
+        if node["tag"] == "img":
+            return False
         useful = []
         for child in node.get("children") or []:
             if isinstance(child, str):

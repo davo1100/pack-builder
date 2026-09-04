@@ -706,7 +706,7 @@ def detect_title(html: str, filename: str) -> str:
         title = strip_tags(match.group(1))
         if title:
             return title
-    stem = re.sub(r"\.(html|docx?)$", "", filename, flags=re.I)
+    stem = re.sub(r"\.(html|docx?|pptx?|pptm|ppsx|ppsm|pps)$", "", filename, flags=re.I)
     stem = re.sub(r"^\d+[_-]?", "", stem)
     return stem.replace("_", " ").strip() or filename
 
@@ -732,12 +732,13 @@ def ingest_file(
     images: dict | None = None,
 ) -> Doc:
     name = Path(filename).name
+    from slides import is_slides_name, slides_to_html
     from word import is_word_name, word_to_html
 
-    if is_word_name(name):
+    if is_word_name(name) or is_slides_name(name):
         if not data:
-            raise ValueError("Word file is empty")
-        html, embedded = word_to_html(data, name)
+            raise ValueError("Word file is empty" if is_word_name(name) else "PowerPoint file is empty")
+        html, embedded = word_to_html(data, name) if is_word_name(name) else slides_to_html(data, name)
         merged = dict(embedded)
         if images:
             merged.update(images)

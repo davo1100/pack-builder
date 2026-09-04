@@ -50,7 +50,7 @@ const PackEditor = {
     iframe.addEventListener("load", () => this._prepare());
   },
 
-  load(html, clientCss, themeCss, pageId) {
+  load(html, clientCss, themeCss, pageId, editable) {
     this.selected = null;
     this.anchor = null;
     this.lastTable = null;
@@ -58,14 +58,15 @@ const PackEditor = {
     this.loadedId = null;
     this.pendingId = pageId || null;
     const iframe = this.iframe;
+    const canEdit = editable !== false;
     const safe = typeof PackSyntax !== "undefined" ? PackSyntax.sanitizeHtml(html) : html;
     iframe.srcdoc = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
+  <style id="pack-client-css">${clientCss}</style>
+  <style id="theme-override">${themeCss || ""}</style>
   <style>
-    ${clientCss}
-    ${themeCss || ""}
     body { background: var(--cream, #F2EEE2); }
     #edit-root { padding: 28px 32px 80px; max-width: 980px; margin: 0 auto; }
     #edit-root:focus { outline: none; }
@@ -103,9 +104,21 @@ const PackEditor = {
   </style>
 </head>
 <body>
-  <div id="edit-root" class="content" contenteditable="true">${safe}</div>
+  <div id="edit-root" class="content"${canEdit ? ' contenteditable="true"' : ""}>${safe}</div>
 </body>
 </html>`;
+  },
+
+  applyClientCss(css) {
+    const doc = this.doc();
+    if (!doc) return;
+    let tag = doc.getElementById("pack-client-css");
+    if (!tag) {
+      tag = doc.createElement("style");
+      tag.id = "pack-client-css";
+      doc.head.insertBefore(tag, doc.head.firstChild);
+    }
+    tag.textContent = css || "";
   },
 
   applyTheme(themeCss) {

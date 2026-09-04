@@ -12,7 +12,7 @@
       <img src="https://eps.edenred.com/hubfs/EPS-Red.svg" alt="Edenred Payment Solutions">
       <div class="studio-title">
         <strong>Client pack builder</strong>
-        <span>Drop HTML or Word specs, edit, then download one file</span>
+        <span>Drop HTML, Word, or PowerPoint specs, edit, then download one file</span>
       </div>
     </div>
     <div class="studio-actions">
@@ -23,14 +23,19 @@
   </header>
 
   <div class="studio-app">
-    <aside class="panel panel-left">
-      <h2 class="section">Source files</h2>
-      <div class="dropzone" id="dropzone" tabindex="0">
-        <strong>Drop HTML or Word files here</strong>
-        <p>Confluence HTML and Word files (.doc or .docx) are converted automatically. Drop images too, or a Word file with pictures inside it.</p>
-        <input id="file-input" type="file" accept=".html,.doc,.docx,.png,.jpg,.jpeg,.gif,.svg,.webp,text/html,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
+    <aside class="panel panel-left" id="panel-left">
+      <div class="panel-left-head">
+        <h2 class="section">Source files</h2>
+        <button type="button" class="panel-toggle" id="btn-collapse-nav" aria-expanded="true" aria-controls="panel-left" title="Hide files panel" aria-label="Hide files panel">‹</button>
       </div>
-      <div class="studio-actions" style="margin-top:10px; justify-content:flex-start;">
+      <div class="panel-left-body">
+      <div class="dropzone" id="dropzone" tabindex="0">
+        <strong>Drop HTML, Word, or PowerPoint files here</strong>
+        <p>Confluence HTML, Word (.doc or .docx), and PowerPoint (.ppt or .pptx) are converted automatically. Drop images too, or a file with pictures inside it.</p>
+        <input id="file-input" type="file" accept=".html,.doc,.docx,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.png,.jpg,.jpeg,.gif,.svg,.webp,text/html,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.presentationml.slideshow" multiple hidden>
+      </div>
+      <div class="studio-actions file-source-actions">
+        <button class="btn btn-quiet" id="btn-add-page" type="button">Add blank page</button>
         <button class="btn btn-quiet" id="btn-import-local" type="button">Import from this project</button>
       </div>
       <div id="file-list"></div>
@@ -101,6 +106,7 @@
           <input id="theme-radius" type="text" value="14">
         </div>
       </details>
+      </div>
     </aside>
 
     <section class="panel-right">
@@ -113,78 +119,123 @@
       </div>
       <div class="workspace" id="workspace-edit" hidden>
         <div class="editor-toolbar" id="text-toolbar">
-          <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
-          <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
-          <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
-          <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
-          <span class="toolbar-split"></span>
-          <button type="button" data-cmd="formatBlock" data-value="p">Text</button>
-          <button type="button" data-cmd="formatBlock" data-value="h2">H2</button>
-          <button type="button" data-cmd="formatBlock" data-value="h3">H3</button>
-          <button type="button" data-cmd="formatBlock" data-value="h4">H4</button>
-          <span class="toolbar-split"></span>
-          <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
-          <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
-          <button type="button" data-cmd="createLink" title="Link">Link</button>
-          <button type="button" id="btn-icon-picker" title="Insert icon">Icon</button>
-          <span class="toolbar-split"></span>
-          <button type="button" class="swatch" data-cmd="foreColor" data-value="#FD0966" title="Brand colour" style="background:#FD0966"></button>
-          <button type="button" class="swatch" data-cmd="foreColor" data-value="#201D22" title="Charcoal" style="background:#201D22"></button>
-          <button type="button" class="swatch" data-cmd="foreColor" data-value="#404C37" title="Olive" style="background:#404C37"></button>
-          <button type="button" class="swatch" data-cmd="foreColor" data-value="#7E6DE2" title="Violet" style="background:#7E6DE2"></button>
+          <div class="tool-group">
+            <span class="toolbar-label">Format</span>
+            <div class="tool-cluster">
+              <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+              <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+              <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+              <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="toolbar-label">Type</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-cmd="formatBlock" data-value="p">Text</button>
+              <button type="button" data-cmd="formatBlock" data-value="h2">H2</button>
+              <button type="button" data-cmd="formatBlock" data-value="h3">H3</button>
+              <button type="button" data-cmd="formatBlock" data-value="h4">H4</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="toolbar-label">Lists</span>
+            <div class="tool-cluster">
+              <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+              <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+              <button type="button" data-cmd="createLink" title="Link">Link</button>
+              <button type="button" id="btn-icon-picker" title="Insert icon">Icon</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="toolbar-label">Text colour</span>
+            <div class="tool-cluster">
+              <button type="button" class="swatch" data-cmd="foreColor" data-value="#FD0966" title="Brand colour" style="background:#FD0966"></button>
+              <button type="button" class="swatch" data-cmd="foreColor" data-value="#201D22" title="Charcoal" style="background:#201D22"></button>
+              <button type="button" class="swatch" data-cmd="foreColor" data-value="#404C37" title="Olive" style="background:#404C37"></button>
+              <button type="button" class="swatch" data-cmd="foreColor" data-value="#7E6DE2" title="Violet" style="background:#7E6DE2"></button>
+            </div>
+          </div>
           <div id="icon-picker" class="icon-picker" hidden>
             <input id="icon-search" type="search" placeholder="Search icons">
             <div id="icon-grid"></div>
           </div>
         </div>
         <div class="editor-toolbar layout-bar" id="layout-toolbar">
-          <span class="toolbar-label">Layout</span>
-          <button type="button" data-layout="up">↑</button>
-          <button type="button" data-layout="down">↓</button>
-          <button type="button" data-layout="duplicate">Duplicate</button>
-          <button type="button" data-layout="delete">Delete</button>
-          <button type="button" data-layout="hide">Hide / show</button>
-          <span class="toolbar-split"></span>
-          <button type="button" data-layout="width" data-value="">Default</button>
-          <button type="button" data-layout="width" data-value="layout-narrow">Narrow</button>
-          <button type="button" data-layout="width" data-value="layout-wide">Wide</button>
-          <button type="button" data-layout="align" data-value="center">Center</button>
-          <button type="button" data-layout="space" data-value="">Space</button>
-          <button type="button" data-layout="space" data-value="layout-space-lg">More space</button>
-          <span class="toolbar-split"></span>
-          <button type="button" data-insert="paragraph">+ Paragraph</button>
-          <button type="button" data-insert="heading">+ Heading</button>
-          <button type="button" data-insert="callout">+ Note</button>
-          <button type="button" data-insert="warning">+ Warning</button>
-          <button type="button" data-insert="rules">+ Icon cards</button>
-          <button type="button" data-insert="table">+ Table</button>
-          <button type="button" data-insert="code">+ Code</button>
-          <button type="button" data-insert="api">+ API</button>
-          <button type="button" data-insert="checklist">+ Checklist</button>
-          <button type="button" data-insert="diagram">+ Diagram</button>
-          <button type="button" id="btn-edit-diagram">Edit diagram</button>
-          <button type="button" data-layout="add-row">+ Table row</button>
-          <button type="button" data-layout="add-col">+ Table column</button>
-          <span class="toolbar-split"></span>
-          <button type="button" data-insert="hero">+ Header</button>
-          <button type="button" data-insert="card">+ Section</button>
-          <span id="hero-tones" class="tone-bar" hidden>
-            <span class="toolbar-split"></span>
-            <span class="toolbar-label">Colour</span>
-            <button type="button" class="swatch" data-layout="tone" data-value="magenta" title="Magenta" style="background:#FD0966"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="violet" title="Violet" style="background:#7E6DE2"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="olive" title="Olive" style="background:#404C37"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="plum" title="Plum" style="background:#521D39"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="charcoal" title="Charcoal" style="background:#201D22"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="mustard" title="Mustard" style="background:#DCC606"></button>
-            <button type="button" class="swatch" data-layout="tone" data-value="lime" title="Lime" style="background:#93CD8F"></button>
-          </span>
-          <span id="card-props" class="card-props" hidden>
-            <span class="toolbar-split"></span>
-            <span class="toolbar-label">Label</span>
+          <div class="tool-group">
+            <span class="toolbar-label">Block</span>
+            <div class="tool-cluster">
+              <button type="button" data-layout="up" title="Move up">↑</button>
+              <button type="button" data-layout="down" title="Move down">↓</button>
+              <button type="button" data-layout="duplicate">Duplicate</button>
+              <button type="button" data-layout="hide">Hide / show</button>
+              <button type="button" class="tool-danger" data-layout="delete">Delete</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="toolbar-label">Width</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-layout="width" data-value="">Default</button>
+              <button type="button" data-layout="width" data-value="layout-narrow">Narrow</button>
+              <button type="button" data-layout="width" data-value="layout-wide">Wide</button>
+              <button type="button" data-layout="align" data-value="center">Center</button>
+            </div>
+          </div>
+          <div class="tool-group">
+            <span class="toolbar-label">Space</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-layout="space" data-value="">Normal</button>
+              <button type="button" data-layout="space" data-value="layout-space-lg">More</button>
+            </div>
+          </div>
+          <div class="tool-group insert-menu">
+            <button type="button" class="btn-insert" id="btn-insert-menu" aria-expanded="false" aria-haspopup="true">+ Add to page</button>
+            <div id="insert-menu" class="insert-panel" hidden>
+              <p class="insert-heading">Page structure</p>
+              <button type="button" data-insert="hero">Header</button>
+              <button type="button" data-insert="card">Section</button>
+              <p class="insert-heading">Writing</p>
+              <button type="button" data-insert="paragraph">Paragraph</button>
+              <button type="button" data-insert="heading">Heading</button>
+              <button type="button" data-insert="callout">Note</button>
+              <button type="button" data-insert="warning">Warning</button>
+              <button type="button" data-insert="checklist">Checklist</button>
+              <p class="insert-heading">Visuals</p>
+              <button type="button" data-insert="rules">Icon cards</button>
+              <button type="button" data-insert="diagram">Diagram</button>
+              <p class="insert-heading">Technical</p>
+              <button type="button" data-insert="table">Table</button>
+              <button type="button" data-insert="code">Code</button>
+              <button type="button" data-insert="api">API</button>
+            </div>
+          </div>
+          <div class="tool-group tool-context" id="table-tools" hidden>
+            <span class="toolbar-label">Table</span>
+            <div class="tool-cluster">
+              <button type="button" data-layout="add-row">+ Row</button>
+              <button type="button" data-layout="add-col">+ Column</button>
+            </div>
+          </div>
+          <div class="tool-group tool-context" id="diagram-tools" hidden>
+            <span class="toolbar-label">Diagram</span>
+            <button type="button" id="btn-edit-diagram">Edit diagram</button>
+          </div>
+          <div class="tool-group tool-context" id="hero-tones" hidden>
+            <span class="toolbar-label">Header colour</span>
+            <div class="tool-cluster">
+              <button type="button" class="swatch" data-layout="tone" data-value="magenta" title="Magenta" style="background:#FD0966"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="violet" title="Violet" style="background:#7E6DE2"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="olive" title="Olive" style="background:#404C37"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="plum" title="Plum" style="background:#521D39"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="charcoal" title="Charcoal" style="background:#201D22"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="mustard" title="Mustard" style="background:#DCC606"></button>
+              <button type="button" class="swatch" data-layout="tone" data-value="lime" title="Lime" style="background:#93CD8F"></button>
+            </div>
+          </div>
+          <div class="tool-group tool-context" id="card-props" hidden>
+            <span class="toolbar-label">Card label</span>
             <input id="card-label" type="text" placeholder="Current" maxlength="32">
             <button type="button" id="btn-card-icon">Change icon</button>
-          </span>
+          </div>
         </div>
         <div class="editor-hint" id="editor-hint">Select a page, then click text to edit. Code examples and tables stay plain text so their structure is preserved.</div>
         <details class="section-rail" id="section-rail" hidden>

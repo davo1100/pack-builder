@@ -17,6 +17,7 @@ FILES = (
     "convert.py",
     "merge.py",
     "word.py",
+    "slides.py",
     "icons.py",
     "build_site.py",
     "Start Pack Builder.bat",

@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from merge import ROOT, build_from_payload, ingest_html, ingest_file, load_client_css, docs_from_payload, settings_from_payload, sync_overview
+from slides import is_slides_name
 from word import is_word_name
 
 SAFE_FOLDERS = ("source", "inbox")
@@ -116,8 +117,21 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 for item in data.get("files") or []:
                     name = item.get("filename") or "document.html"
                     item_dir = None if hosted() else (item.get("asset_dir") or asset_dir)
-                    if is_word_name(name) or item.get("docx") or item.get("doc"):
-                        raw_b64 = item.get("docx") or item.get("doc") or ""
+                    if (
+                        is_word_name(name)
+                        or is_slides_name(name)
+                        or item.get("docx")
+                        or item.get("doc")
+                        or item.get("pptx")
+                        or item.get("ppt")
+                    ):
+                        raw_b64 = (
+                            item.get("docx")
+                            or item.get("doc")
+                            or item.get("pptx")
+                            or item.get("ppt")
+                            or ""
+                        )
                         binary = base64.b64decode(raw_b64) if raw_b64 else b""
                         docs.append(
                             _doc_to_payload(
@@ -185,7 +199,17 @@ def _list_local_files() -> dict:
         if not directory.is_dir():
             continue
         for path in sorted(directory.iterdir()):
-            if path.is_file() and path.suffix.lower() in {".html", ".doc", ".docx"}:
+            if path.is_file() and path.suffix.lower() in {
+                ".html",
+                ".doc",
+                ".docx",
+                ".ppt",
+                ".pptx",
+                ".pptm",
+                ".pps",
+                ".ppsx",
+                ".ppsm",
+            }:
                 files.append({"folder": folder, "name": path.name})
     return {"files": files}
 
@@ -210,7 +234,7 @@ def _read_local_file(folder: str, name: str) -> dict:
     path = ROOT / folder / name
     if not path.is_file():
         raise FileNotFoundError
-    if is_word_name(name):
+    if is_word_name(name) or is_slides_name(name):
         return _doc_to_payload(ingest_file(name, data=path.read_bytes(), asset_dir=path.parent))
     raw = path.read_text(encoding="utf-8")
     return _doc_to_payload(ingest_html(name, raw, asset_dir=path.parent))
@@ -238,7 +262,7 @@ def main() -> None:
     if hosted():
         print("Hosted mode: drop files in the browser. Uploads are processed in memory and not saved.", flush=True)
     else:
-        print("Drop HTML or Word files in the browser, or put them in inbox/ or source/ and import.", flush=True)
+        print("Drop HTML, Word, or PowerPoint files in the browser, or put them in inbox/ or source/ and import.", flush=True)
         print("Press Ctrl+C to stop.", flush=True)
         try:
             webbrowser.open(url)
