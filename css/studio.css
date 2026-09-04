@@ -431,6 +431,27 @@ h2.section:first-child {
   display: none !important;
 }
 
+.card-props {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-props[hidden] {
+  display: none !important;
+}
+
+.card-props input {
+  width: 9.5em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--charcoal);
+}
+
 .toolbar-split {
   width: 1px;
   height: 18px;

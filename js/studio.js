@@ -670,9 +670,14 @@ document.getElementById("icon-search").addEventListener("input", (event) => {
 document.getElementById("icon-grid").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-icon]");
   if (!button) return;
+  closeIconPicker();
+  if (PackEditor.selected?.matches?.(".card")) {
+    const ok = PackEditor.setCardIcon(button.dataset.icon);
+    if (ok) setStatus("Card icon updated", "ok");
+    return;
+  }
   const html = IconLibrary.html(button.dataset.icon);
   const ok = PackEditor.insertInline(html);
-  closeIconPicker();
   if (!ok) setStatus("Click in the page text first, then insert an icon", "error");
   else setStatus("Icon inserted", "ok");
 });
@@ -680,7 +685,7 @@ document.getElementById("icon-grid").addEventListener("click", (event) => {
 document.addEventListener("click", (event) => {
   const picker = document.getElementById("icon-picker");
   if (picker.hidden) return;
-  if (event.target.closest("#icon-picker") || event.target.closest("#btn-icon-picker")) return;
+  if (event.target.closest("#icon-picker") || event.target.closest("#btn-icon-picker") || event.target.closest("#btn-card-icon")) return;
   closeIconPicker();
 });
 
@@ -767,11 +772,20 @@ PackEditor.bind(els.editor, {
         button.classList.toggle("is-active", button.dataset.value === tone);
       });
     }
+    const card = PackEditor.selected?.matches?.(".card") ? PackEditor.selected : null;
+    const cardProps = document.getElementById("card-props");
+    cardProps.hidden = !card;
+    const labelInput = document.getElementById("card-label");
+    if (card && document.activeElement !== labelInput) {
+      labelInput.value = PackEditor.cardLabel();
+    }
     renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
     } else if (header) {
       els.editorHint.textContent = "Header box selected. Pick a colour, then edit the title, description, and labels.";
+    } else if (card) {
+      els.editorHint.textContent = "Contents card selected. Change the label and icon here. The summary and tags can be edited in the card.";
     } else if (info.plain || info.protected) {
       els.editorHint.textContent = `${info.label}: plain-text only. Structure is locked so the layout stays intact.`;
     } else if (PackEditor.selected?.matches?.(".content-card, .overview-section")) {
@@ -986,6 +1000,19 @@ async function downloadPack() {
 
 els.btnPreview.addEventListener("click", () => schedulePreview(true));
 els.btnDownload.addEventListener("click", () => downloadPack());
+
+document.getElementById("btn-card-icon").addEventListener("click", async (event) => {
+  event.preventDefault();
+  const picker = document.getElementById("icon-picker");
+  await IconLibrary.load();
+  renderIconPicker(document.getElementById("icon-search").value);
+  picker.hidden = false;
+  document.getElementById("icon-search").focus();
+});
+
+document.getElementById("card-label").addEventListener("input", (event) => {
+  PackEditor.setCardLabel(event.target.value);
+});
 
 document.getElementById("btn-renumber-sections").addEventListener("click", () => {
   PackEditor.renumberSections();

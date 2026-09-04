@@ -594,7 +594,7 @@ const PackEditor = {
     if (el.matches(".toc-card")) return "Table of contents";
     if (el.matches(".checklist-box")) return "Checklist";
     if (el.matches(".rule-grid")) return "Icon cards";
-    if (el.matches(".card")) return "Card";
+    if (el.matches(".card")) return "Contents card";
     if (el.matches(".api-box")) return "API box";
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
     if (el.matches(".code-fold, .code-container, pre")) return "Code example";
@@ -778,6 +778,46 @@ const PackEditor = {
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
+  },
+
+  setCardLabel(text) {
+    const card = this.selected?.matches?.(".card") ? this.selected : null;
+    if (!card) return false;
+    const header = card.querySelector(".card-header");
+    let status = card.querySelector(".card-status");
+    const value = String(text || "").trim() || "Current";
+    if (!status) {
+      status = this.doc().createElement("span");
+      (header || card).appendChild(status);
+    }
+    const draft = /^draft$/i.test(value);
+    status.className = `card-status ${draft ? "status-draft" : "status-current"}`;
+    status.setAttribute("data-custom", "1");
+    status.textContent = value;
+    this._changed();
+    return true;
+  },
+
+  setCardIcon(name) {
+    const card = this.selected?.matches?.(".card") ? this.selected : null;
+    if (!card || !name || typeof IconLibrary === "undefined") return false;
+    const html = IconLibrary.html(name, 18);
+    const h3 = card.querySelector("h3");
+    if (!h3 || !html) return false;
+    const template = this.doc().createElement("template");
+    template.innerHTML = html.trim();
+    const icon = template.content.firstElementChild;
+    if (!icon) return false;
+    const existing = h3.querySelector(".pack-icon");
+    if (existing) existing.replaceWith(icon);
+    else h3.prepend(icon, this.doc().createTextNode(" "));
+    card.setAttribute("data-icon", name);
+    this._changed();
+    return true;
+  },
+
+  cardLabel() {
+    return this.selected?.querySelector?.(".card-status")?.textContent.trim() || "";
   },
 
   _changed() {

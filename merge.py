@@ -967,14 +967,15 @@ def contents_card(doc: Doc) -> str:
         else ""
     )
     page_id = html_lib.escape(doc.filename, quote=True)
+    icon_name = icon_for_title(doc.title)
     return (
-        f'<div class="card" data-page-id="{page_id}">\n'
+        f'<div class="card" data-page-id="{page_id}" data-icon="{html_lib.escape(icon_name, quote=True)}">\n'
         "<div>\n"
         '<div class="card-header">\n'
         f'<span class="card-num">{html_lib.escape(doc.num)}</span>\n'
         f"{status}\n"
         "</div>\n"
-        f"<h3>{icon_html(icon_for_title(doc.title), 18)} {html_lib.escape(doc.title)}</h3>\n"
+        f"<h3>{icon_html(icon_name, 18)} {html_lib.escape(doc.title)}</h3>\n"
         f"<p>{html_lib.escape(page_summary(doc))}</p>\n"
         f"{tag_html}\n"
         "</div>\n"
@@ -1039,6 +1040,18 @@ def _extract_cards(grid_html: str) -> dict[str, str]:
     return found
 
 
+def _card_heading(card: str, title: str) -> str:
+    match = re.search(r"<h3>([\s\S]*?)</h3>", card)
+    icon = ""
+    if match:
+        found = re.search(r'<span class="pack-icon"[^>]*>[\s\S]*?</span>', match.group(1))
+        if found:
+            icon = found.group(0)
+    if not icon:
+        icon = icon_html(icon_for_title(title), 18)
+    return f"<h3>{icon} {html_lib.escape(title)}</h3>"
+
+
 def _refresh_card(card: str, doc: Doc) -> str:
     page_id = html_lib.escape(doc.filename, quote=True)
     if "data-page-id=" in card:
@@ -1051,16 +1064,18 @@ def _refresh_card(card: str, doc: Doc) -> str:
         card,
         count=1,
     )
-    status_label = "Draft" if doc.draft else "Current"
-    status_class = "status-draft" if doc.draft else "status-current"
-    card = re.sub(
-        r'<span class="card-status status-(?:draft|current)">[\s\S]*?</span>',
-        f'<span class="card-status {status_class}">{status_label}</span>',
-        card,
-        count=1,
-    )
+    status_open = re.search(r'<span class="card-status[^"]*"[^>]*>', card)
+    if not (status_open and "data-custom=" in status_open.group(0)):
+        status_label = "Draft" if doc.draft else "Current"
+        status_class = "status-draft" if doc.draft else "status-current"
+        card = re.sub(
+            r'<span class="card-status status-(?:draft|current)">[\s\S]*?</span>',
+            f'<span class="card-status {status_class}">{status_label}</span>',
+            card,
+            count=1,
+        )
     card = re.sub(r'href="#[^"]+"', f'href="#{html_lib.escape(doc.id, quote=True)}"', card, count=1)
-    heading = f"<h3>{icon_html(icon_for_title(doc.title), 18)} {html_lib.escape(doc.title)}</h3>"
+    heading = _card_heading(card, doc.title)
     card = re.sub(r"<h3>([\s\S]*?)</h3>", lambda _m: heading, card, count=1)
     return card
 
