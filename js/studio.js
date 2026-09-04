@@ -721,6 +721,14 @@ document.getElementById("text-toolbar").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-cmd]");
   if (!button) return;
   const ok = PackEditor.command(button.dataset.cmd, button.dataset.value || undefined);
+  if (button.dataset.cmd === "undo") {
+    if (!ok) setStatus("Nothing to undo", "error");
+    return;
+  }
+  if (button.dataset.cmd === "redo") {
+    if (!ok) setStatus("Nothing to redo", "error");
+    return;
+  }
   if (!ok) setStatus("Rich text is off inside code examples and tables", "error");
 });
 
@@ -798,9 +806,16 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
       openDiagramEditor(false);
       return;
     }
+    if (insert.dataset.insert === "image") {
+      openImageModal("add");
+      return;
+    }
     PackEditor.insert(insert.dataset.insert);
     if (insert.dataset.insert === "hero") {
       setStatus("Header box ready — pick a colour and edit the text", "ok");
+    }
+    if (insert.dataset.insert === "columns") {
+      setStatus("Columns added — click a column to write in it, or change 2–4 columns here", "ok");
     }
     return;
   }
@@ -839,9 +854,19 @@ document.addEventListener("click", (event) => {
 
 function setToolbarLocked(locked) {
   document.querySelectorAll("#text-toolbar button").forEach((button) => {
+    if (button.id === "btn-undo" || button.id === "btn-redo") return;
     button.disabled = locked;
   });
+  syncHistoryButtons();
   els.editorHint.classList.toggle("locked", locked);
+}
+
+function syncHistoryButtons() {
+  const info = PackEditor.historyInfo();
+  const undo = document.getElementById("btn-undo");
+  const redo = document.getElementById("btn-redo");
+  if (undo) undo.disabled = !info.canUndo;
+  if (redo) redo.disabled = !info.canRedo;
 }
 
 function renderSectionOutline() {
@@ -880,6 +905,9 @@ PackEditor.bind(els.editor, {
     schedulePreview();
     renderSectionOutline();
   },
+  onHistory() {
+    syncHistoryButtons();
+  },
   onSelect(info) {
     setToolbarLocked(Boolean(info.plain || info.protected));
     const isDiagram = info.label === "Diagram";
@@ -904,9 +932,21 @@ PackEditor.bind(els.editor, {
     if (tableTools) tableTools.hidden = !isTable;
     const diagramTools = document.getElementById("diagram-tools");
     if (diagramTools) diagramTools.hidden = !isDiagram;
+    const imageTools = document.getElementById("image-tools");
+    const image = PackEditor.imageInfo();
+    if (imageTools) imageTools.hidden = !image;
+    if (image) syncImageTools(image);
+    const columnTools = document.getElementById("column-tools");
+    const columns = PackEditor.columnsInfo();
+    if (columnTools) columnTools.hidden = !columns;
+    if (columns) syncColumnTools(columns);
     renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+    } else if (image) {
+      els.editorHint.textContent = "Image selected. Change size or position here, drag the purple corner, or use Block arrows to move it.";
+    } else if (columns && columns.hasGrid) {
+      els.editorHint.textContent = "Column layout selected. Change 1–4 columns here, click a column to add content, or use Block arrows to reorder a column.";
     } else if (isTable) {
       els.editorHint.textContent = "Table selected. Add a row or column here, or edit the cells in the page.";
     } else if (header) {
@@ -916,7 +956,7 @@ PackEditor.bind(els.editor, {
     } else if (info.plain || info.protected) {
       els.editorHint.textContent = `${info.label}: plain-text only. Structure is locked so the layout stays intact.`;
     } else if (PackEditor.selected?.matches?.(".content-card, .overview-section")) {
-      els.editorHint.textContent = "Section selected. Use Add to page for tables, notes, diagrams, and other blocks.";
+      els.editorHint.textContent = "Section selected. Use Columns to split it, or Add to page for tables, notes, diagrams, and other blocks.";
     } else if (PackEditor.selected) {
       els.editorHint.textContent = `Selected ${info.label}. Move, duplicate, or hide it here, or add another block.`;
     } else {
@@ -991,6 +1031,21 @@ document.getElementById("diagram-height").addEventListener("change", (event) => 
   DiagramEditor._draw();
 });
 document.addEventListener("keydown", (event) => {
+  if (!document.getElementById("image-modal").hidden && event.key === "Escape") {
+    closeImageModal();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && document.getElementById("diagram-modal").hidden && document.getElementById("image-modal").hidden) {
+    const tag = event.target.tagName;
+    const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    const key = event.key.toLowerCase();
+    if (!inField && state.tab === "edit" && (key === "z" || key === "y")) {
+      event.preventDefault();
+      if (key === "y" || event.shiftKey) PackEditor.redo();
+      else PackEditor.undo();
+      return;
+    }
+  }
   if (document.getElementById("diagram-modal").hidden) return;
   if (event.key === "Escape") DiagramEditor.close();
   if (event.key === "Delete" || event.key === "Backspace") {
@@ -999,6 +1054,165 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     DiagramEditor.deleteSelected();
   }
+});
+
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+let imageModalMode = "add";
+
+function syncImageTools(info) {
+  const width = document.getElementById("image-width");
+  const label = document.getElementById("image-width-label");
+  const alt = document.getElementById("image-alt-edit");
+  if (width && document.activeElement !== width) width.value = String(info.width);
+  if (label) label.textContent = `${info.width}%`;
+  if (alt && document.activeElement !== alt) alt.value = info.alt;
+  document.querySelectorAll("#image-tools [data-image-size]").forEach((button) => {
+    button.classList.toggle("is-active", Number(button.dataset.imageSize) === info.width);
+  });
+  document.querySelectorAll("#image-tools [data-image-align]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.imageAlign === info.align);
+  });
+}
+
+function syncColumnTools(info) {
+  document.querySelectorAll("#column-tools [data-columns]").forEach((button) => {
+    const key = button.dataset.columns;
+    if (key === "add") button.disabled = info.count >= 4;
+    else if (key === "remove") button.disabled = info.count <= 1;
+    else button.classList.toggle("is-active", Number(key) === info.count);
+  });
+}
+
+function openImageModal(mode) {
+  imageModalMode = mode === "replace" ? "replace" : "add";
+  const modal = document.getElementById("image-modal");
+  const title = document.getElementById("image-modal-title");
+  const apply = document.getElementById("image-apply");
+  const url = document.getElementById("image-url");
+  const alt = document.getElementById("image-alt");
+  const info = PackEditor.imageInfo();
+  title.textContent = imageModalMode === "replace" ? "Replace image" : "Add image";
+  apply.textContent = imageModalMode === "replace" ? "Replace" : "Add image";
+  url.value = info && imageModalMode === "replace" && !info.src.startsWith("data:") ? info.src : "";
+  alt.value = info && imageModalMode === "replace" ? info.alt : "";
+  modal.hidden = false;
+  url.focus();
+}
+
+function closeImageModal() {
+  document.getElementById("image-modal").hidden = true;
+  document.getElementById("image-file").value = "";
+}
+
+function applyImageSource(src, alt) {
+  if (imageModalMode === "replace") {
+    const ok = PackEditor.replaceImageSrc(src);
+    if (!ok) {
+      setStatus("Use an http(s) image URL or an image file", "error");
+      return false;
+    }
+    PackEditor.setImageAlt(alt);
+    setStatus("Image updated", "ok");
+  } else {
+    const ok = PackEditor.insertImage(src, alt);
+    if (!ok) {
+      setStatus("Use an http(s) image URL or an image file", "error");
+      return false;
+    }
+    setStatus("Image added — resize or move it with the Image tools", "ok");
+  }
+  closeImageModal();
+  return true;
+}
+
+function readImageFile(file) {
+  if (!file || !file.type.startsWith("image/")) {
+    setStatus("Choose a PNG, JPEG, GIF, WebP, or SVG file", "error");
+    return;
+  }
+  if (file.size > IMAGE_MAX_BYTES) {
+    setStatus("Image files must be 5 MB or smaller", "error");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    applyImageSource(String(reader.result || ""), document.getElementById("image-alt").value.trim());
+  };
+  reader.onerror = () => setStatus("Could not read that image", "error");
+  reader.readAsDataURL(file);
+}
+
+document.getElementById("column-tools").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-columns]");
+  if (!button) return;
+  const key = button.dataset.columns;
+  let ok = false;
+  if (key === "add") ok = PackEditor.addColumn();
+  else if (key === "remove") ok = PackEditor.removeColumn();
+  else ok = PackEditor.setColumnCount(key);
+  if (!ok) {
+    setStatus("Click a section first, then choose columns", "error");
+    return;
+  }
+  const info = PackEditor.columnsInfo();
+  if (info) syncColumnTools(info);
+  setStatus(info && info.count > 1 ? `${info.count} columns` : "Section is one column again", "ok");
+});
+
+document.getElementById("image-tools").addEventListener("click", (event) => {
+  const size = event.target.closest("[data-image-size]");
+  if (size) {
+    PackEditor.setImageSize(size.dataset.imageSize);
+    const info = PackEditor.imageInfo();
+    if (info) syncImageTools(info);
+    return;
+  }
+  const align = event.target.closest("[data-image-align]");
+  if (align) {
+    PackEditor.setImageAlign(align.dataset.imageAlign);
+    const info = PackEditor.imageInfo();
+    if (info) syncImageTools(info);
+  }
+});
+
+document.getElementById("image-width").addEventListener("input", (event) => {
+  PackEditor.setImageSize(event.target.value);
+  document.getElementById("image-width-label").textContent = `${event.target.value}%`;
+});
+
+document.getElementById("image-alt-edit").addEventListener("input", (event) => {
+  PackEditor.setImageAlt(event.target.value);
+});
+
+document.getElementById("btn-replace-image").addEventListener("click", () => {
+  openImageModal("replace");
+});
+
+document.getElementById("image-cancel").addEventListener("click", () => closeImageModal());
+document.getElementById("image-choose-file").addEventListener("click", () => {
+  document.getElementById("image-file").click();
+});
+document.getElementById("image-file").addEventListener("change", (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (file) readImageFile(file);
+});
+document.getElementById("image-apply").addEventListener("click", () => {
+  const url = document.getElementById("image-url").value.trim();
+  const alt = document.getElementById("image-alt").value.trim();
+  if (!url) {
+    setStatus("Paste an image URL, or upload a file", "error");
+    return;
+  }
+  applyImageSource(url, alt);
+});
+document.getElementById("image-url").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    document.getElementById("image-apply").click();
+  }
+});
+document.getElementById("image-modal").addEventListener("click", (event) => {
+  if (event.target.id === "image-modal") closeImageModal();
 });
 
 function schedulePreview(immediate) {

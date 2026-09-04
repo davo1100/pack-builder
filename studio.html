@@ -120,6 +120,13 @@
       <div class="workspace" id="workspace-edit" hidden>
         <div class="editor-toolbar" id="text-toolbar">
           <div class="tool-group">
+            <span class="toolbar-label">History</span>
+            <div class="tool-cluster">
+              <button type="button" id="btn-undo" data-cmd="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+              <button type="button" id="btn-redo" data-cmd="redo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+            </div>
+          </div>
+          <div class="tool-group">
             <span class="toolbar-label">Format</span>
             <div class="tool-cluster">
               <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
@@ -193,6 +200,7 @@
               <p class="insert-heading">Page structure</p>
               <button type="button" data-insert="hero">Header</button>
               <button type="button" data-insert="card">Section</button>
+              <button type="button" data-insert="columns">Columns</button>
               <p class="insert-heading">Writing</p>
               <button type="button" data-insert="paragraph">Paragraph</button>
               <button type="button" data-insert="heading">Heading</button>
@@ -200,6 +208,7 @@
               <button type="button" data-insert="warning">Warning</button>
               <button type="button" data-insert="checklist">Checklist</button>
               <p class="insert-heading">Visuals</p>
+              <button type="button" data-insert="image">Image</button>
               <button type="button" data-insert="rules">Icon cards</button>
               <button type="button" data-insert="diagram">Diagram</button>
               <p class="insert-heading">Technical</p>
@@ -207,6 +216,17 @@
               <button type="button" data-insert="code">Code</button>
               <button type="button" data-insert="api">API</button>
             </div>
+          </div>
+          <div class="tool-group tool-context" id="column-tools" hidden>
+            <span class="toolbar-label">Columns</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-columns="1">1</button>
+              <button type="button" data-columns="2">2</button>
+              <button type="button" data-columns="3">3</button>
+              <button type="button" data-columns="4">4</button>
+            </div>
+            <button type="button" data-columns="add">+ Column</button>
+            <button type="button" data-columns="remove">− Column</button>
           </div>
           <div class="tool-group tool-context" id="table-tools" hidden>
             <span class="toolbar-label">Table</span>
@@ -218,6 +238,26 @@
           <div class="tool-group tool-context" id="diagram-tools" hidden>
             <span class="toolbar-label">Diagram</span>
             <button type="button" id="btn-edit-diagram">Edit diagram</button>
+          </div>
+          <div class="tool-group tool-context" id="image-tools" hidden>
+            <span class="toolbar-label">Image</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-image-size="32">S</button>
+              <button type="button" data-image-size="56">M</button>
+              <button type="button" data-image-size="80">L</button>
+              <button type="button" data-image-size="100">Full</button>
+            </div>
+            <label class="image-size-field">Width
+              <input id="image-width" type="range" min="20" max="100" value="56">
+              <span id="image-width-label">56%</span>
+            </label>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-image-align="left">Left</button>
+              <button type="button" data-image-align="center">Center</button>
+              <button type="button" data-image-align="right">Right</button>
+            </div>
+            <input id="image-alt-edit" type="text" placeholder="Alt text" maxlength="160">
+            <button type="button" id="btn-replace-image">Replace</button>
           </div>
           <div class="tool-group tool-context" id="hero-tones" hidden>
             <span class="toolbar-label">Header colour</span>
@@ -307,6 +347,33 @@
         <button type="button" id="diagram-reverse">Reverse</button>
       </div>
       <div id="diagram-canvas" class="diagram-canvas"></div>
+    </div>
+  </div>
+
+  <div id="image-modal" class="image-modal" hidden>
+    <div class="image-sheet">
+      <header class="image-head">
+        <div>
+          <strong id="image-modal-title">Add image</strong>
+          <span>Paste a web address or upload a picture from your computer.</span>
+        </div>
+        <button class="btn" type="button" id="image-cancel">Cancel</button>
+      </header>
+      <div class="image-body">
+        <div class="field">
+          <label for="image-url">Image URL</label>
+          <input id="image-url" type="url" placeholder="https://">
+        </div>
+        <div class="field">
+          <label for="image-alt">Alt text</label>
+          <input id="image-alt" type="text" placeholder="Short description of the image" maxlength="160">
+        </div>
+        <div class="studio-actions" style="justify-content:flex-start; flex-wrap:wrap;">
+          <button class="btn" type="button" id="image-choose-file">Upload file</button>
+          <button class="btn btn-primary" type="button" id="image-apply">Add image</button>
+        </div>
+        <input id="image-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden>
+      </div>
     </div>
   </div>
 

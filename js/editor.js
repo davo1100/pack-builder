@@ -7,6 +7,9 @@ const BLOCK_SELECTOR = [
   ".card",
   ".api-box",
   ".diagram-container",
+  ".pack-image",
+  ".pack-columns",
+  ".pack-column",
   ".callout",
   ".callout-warning",
   ".checklist-box",
@@ -41,12 +44,17 @@ const PackEditor = {
   lastDiagram: null,
   loadedId: null,
   pendingId: null,
+  history: [],
+  historyIndex: -1,
+  _historyTimer: null,
+  _historyPaused: false,
 
   bind(iframe, handlers) {
     this.iframe = iframe;
     this.onChange = handlers.onChange || (() => {});
     this.onSelect = handlers.onSelect || (() => {});
     this.onEditDiagram = handlers.onEditDiagram || (() => {});
+    this.onHistory = handlers.onHistory || (() => {});
     iframe.addEventListener("load", () => this._prepare());
   },
 
@@ -57,6 +65,7 @@ const PackEditor = {
     this.lastDiagram = null;
     this.loadedId = null;
     this.pendingId = pageId || null;
+    this._resetHistory();
     const iframe = this.iframe;
     const canEdit = editable !== false;
     const safe = typeof PackSyntax !== "undefined" ? PackSyntax.sanitizeHtml(html) : html;
@@ -95,6 +104,48 @@ const PackEditor = {
       z-index: 3;
     }
     [data-plain] { caret-color: #FD0966; }
+    .pack-image {
+      display: block;
+      position: relative;
+      width: var(--pack-image-width, 56%);
+      max-width: 100%;
+      margin: 16px 0;
+    }
+    .pack-image img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+    .pack-image-left { margin-right: auto; margin-left: 0; }
+    .pack-image-center { margin-left: auto; margin-right: auto; }
+    .pack-image-right { margin-left: auto; margin-right: 0; }
+    .pack-image-handle {
+      position: absolute;
+      right: -5px;
+      bottom: -5px;
+      width: 14px;
+      height: 14px;
+      background: #7E6DE2;
+      border: 2px solid #fff;
+      border-radius: 3px;
+      box-shadow: 0 1px 4px rgba(32, 29, 34, 0.25);
+      cursor: nwse-resize;
+    }
+    .pack-columns {
+      display: grid;
+      grid-template-columns: repeat(var(--pack-columns, 2), minmax(0, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+      align-items: start;
+    }
+    .pack-column {
+      min-width: 0;
+      min-height: 72px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      outline: 1px dashed rgba(126, 109, 226, 0.4);
+    }
     #edit-root .is-hidden {
       display: block !important;
       opacity: 0.4;
@@ -160,14 +211,17 @@ const PackEditor = {
       el.removeAttribute("data-layout-block");
       el.removeAttribute("data-lock-label");
     });
+    clone.querySelectorAll(".pack-image-handle").forEach((el) => el.remove());
     return clone.innerHTML;
   },
 
   command(name, value) {
+    if (name === "undo") return this.undo();
+    if (name === "redo") return this.redo();
     const doc = this.doc();
     const info = this.selectionInfo();
     if (!doc) return false;
-    if (info.plain && !["undo", "redo"].includes(name)) return false;
+    if (info.plain) return false;
     doc.defaultView.focus();
     if (name === "createLink") {
       const href = value || doc.defaultView.prompt("Link URL", "https://");
@@ -197,6 +251,12 @@ const PackEditor = {
       this._placeHtml(this._snippet("hero"), { pageLevel: true, prepend: true });
       return;
     }
+    if (kind === "columns") {
+      const grid = this.selected?.closest?.(".pack-columns");
+      if (grid) this._select(grid);
+      this._placeHtml(this._snippet("columns"));
+      return;
+    }
     const pageLevel = PAGE_LEVEL_KINDS.has(kind);
     const html = this._snippet(kind, { inside: Boolean(!pageLevel && this._insertContainer()) });
     if (!html) return;
@@ -205,6 +265,198 @@ const PackEditor = {
 
   insertHtml(html) {
     this._placeHtml(html, { pageLevel: false });
+  },
+
+  _safeImageSrc(src) {
+    const value = String(src || "").trim();
+    if (/^https?:\/\//i.test(value)) return value;
+    if (/^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,/i.test(value)) return value;
+    return "";
+  },
+
+  insertImage(src, alt) {
+    const safeSrc = this._safeImageSrc(src);
+    if (!safeSrc || !this.root()) return false;
+    const altText = String(alt || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+    const encoded = safeSrc.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+    this._placeHtml(
+      `<figure class="pack-image pack-image-center" style="--pack-image-width:56%"><img src="${encoded}" alt="${altText}"></figure>`
+    );
+    return true;
+  },
+
+  imageFromSelection() {
+    if (this.selected?.matches?.(".pack-image")) return this.selected;
+    return this.selected?.closest?.(".pack-image") || null;
+  },
+
+  imageInfo() {
+    const figure = this.imageFromSelection();
+    if (!figure) return null;
+    const img = figure.querySelector("img");
+    const raw = figure.style.getPropertyValue("--pack-image-width");
+    const width = Math.max(10, Math.min(100, parseInt(raw, 10) || 56));
+    const align = figure.classList.contains("pack-image-left")
+      ? "left"
+      : figure.classList.contains("pack-image-right")
+        ? "right"
+        : "center";
+    return {
+      width,
+      align,
+      alt: img?.getAttribute("alt") || "",
+      src: img?.getAttribute("src") || "",
+    };
+  },
+
+  setImageSize(percent) {
+    const figure = this.imageFromSelection();
+    if (!figure) return false;
+    const width = Math.max(10, Math.min(100, Math.round(Number(percent) || 56)));
+    figure.style.setProperty("--pack-image-width", `${width}%`);
+    this._changed();
+    return true;
+  },
+
+  setImageAlign(align) {
+    const figure = this.imageFromSelection();
+    if (!figure) return false;
+    const next = ["left", "center", "right"].includes(align) ? align : "center";
+    figure.classList.remove("pack-image-left", "pack-image-center", "pack-image-right");
+    figure.classList.add(`pack-image-${next}`);
+    this._changed();
+    return true;
+  },
+
+  setImageAlt(alt) {
+    const img = this.imageFromSelection()?.querySelector("img");
+    if (!img) return false;
+    img.setAttribute("alt", String(alt || ""));
+    this._changed();
+    return true;
+  },
+
+  replaceImageSrc(src) {
+    const img = this.imageFromSelection()?.querySelector("img");
+    const safeSrc = this._safeImageSrc(src);
+    if (!img || !safeSrc) return false;
+    img.setAttribute("src", safeSrc);
+    this._changed();
+    return true;
+  },
+
+  _sectionFromSelection() {
+    if (this.selected?.matches?.(".content-card, .overview-section")) return this.selected;
+    return this.selected?.closest?.(".content-card, .overview-section")
+      || this.anchor?.closest?.(".content-card, .overview-section")
+      || null;
+  },
+
+  columnsFromSelection() {
+    if (this.selected?.matches?.(".pack-columns")) return this.selected;
+    const nested = this.selected?.closest?.(".pack-columns");
+    if (nested) return nested;
+    return this._sectionFromSelection()?.querySelector(":scope > .pack-columns") || null;
+  },
+
+  columnsInfo() {
+    const grid = this.columnsFromSelection();
+    const section = this._sectionFromSelection();
+    if (!grid && !section) return null;
+    const count = grid ? grid.querySelectorAll(":scope > .pack-column").length : 1;
+    return { count: Math.max(1, Math.min(4, count)), hasGrid: Boolean(grid) };
+  },
+
+  setColumnCount(count) {
+    const n = Math.max(1, Math.min(4, Math.round(Number(count) || 2)));
+    const section = this._sectionFromSelection();
+    let grid = this.columnsFromSelection();
+    if (!grid && section && n > 1) grid = this._wrapSectionInColumns(section);
+    if (!grid) return false;
+    this._applyColumnCount(grid, n);
+    this._prepare();
+    if (n === 1) {
+      if (section && this.root()?.contains(section)) this._select(section);
+    } else if (this.root()?.contains(grid)) this._select(grid);
+    this._changed();
+    return true;
+  },
+
+  addColumn() {
+    const info = this.columnsInfo();
+    return this.setColumnCount(Math.min(4, (info?.count || 1) + 1));
+  },
+
+  removeColumn() {
+    const info = this.columnsInfo();
+    if (!info || info.count <= 1) return false;
+    return this.setColumnCount(info.count - 1);
+  },
+
+  _wrapSectionInColumns(section) {
+    const doc = this.doc();
+    const grid = doc.createElement("div");
+    grid.className = "pack-columns pack-columns-2";
+    grid.style.setProperty("--pack-columns", "2");
+    const col = doc.createElement("div");
+    col.className = "pack-column";
+    const heading = section.firstElementChild?.matches?.("h1, h2") ? section.firstElementChild : null;
+    [...section.children].forEach((child) => {
+      if (child === heading) return;
+      col.appendChild(child);
+    });
+    if (!col.childNodes.length) {
+      const p = doc.createElement("p");
+      p.textContent = "Add copy here.";
+      col.appendChild(p);
+    }
+    grid.appendChild(col);
+    section.appendChild(grid);
+    return grid;
+  },
+
+  _columnPlaceholder(col) {
+    const text = col.textContent.trim();
+    return !text || text === "Add copy here." || text === "Left column" || text === "Right column";
+  },
+
+  _applyColumnCount(grid, count) {
+    const n = Math.max(1, Math.min(4, count));
+    const cols = [...grid.querySelectorAll(":scope > .pack-column")];
+    const doc = this.doc();
+    while (cols.length < n) {
+      const col = doc.createElement("div");
+      col.className = "pack-column";
+      const p = doc.createElement("p");
+      p.textContent = "Add copy here.";
+      col.appendChild(p);
+      grid.appendChild(col);
+      cols.push(col);
+    }
+    while (cols.length > n) {
+      const last = cols.pop();
+      if (!this._columnPlaceholder(last) && cols.length) {
+        const prev = cols[cols.length - 1];
+        while (last.firstChild) prev.appendChild(last.firstChild);
+      }
+      last.remove();
+    }
+    if (n === 1) {
+      const col = grid.querySelector(":scope > .pack-column");
+      const parent = grid.parentNode;
+      while (col?.firstChild) parent.insertBefore(col.firstChild, grid);
+      grid.remove();
+      return;
+    }
+    this._syncColumnVar(grid);
+  },
+
+  _syncColumnVar(grid) {
+    if (!grid) return;
+    const n = grid.querySelectorAll(":scope > .pack-column").length;
+    grid.style.setProperty("--pack-columns", String(n));
+    grid.classList.remove("pack-columns-1", "pack-columns-2", "pack-columns-3", "pack-columns-4");
+    if (n > 1) grid.classList.add(`pack-columns-${n}`);
   },
 
   _icon(name, size) {
@@ -227,6 +479,10 @@ const PackEditor = {
   <div class="rule-item"><h4>${this._icon("globe", 18)} Country Code Limits</h4><p>Restricts allowed countries where authorisations can be processed.</p></div>
 </div>`,
       card: '<div class="content-card"><h2>New section</h2><p>Add copy here.</p></div>',
+      columns: `<div class="pack-columns pack-columns-2" style="--pack-columns:2">
+  <div class="pack-column"><p>Left column</p></div>
+  <div class="pack-column"><p>Right column</p></div>
+</div>`,
       hero: `<header class="hero">
   <h1>Page title</h1>
   <p>Short description of this page.</p>
@@ -276,6 +532,9 @@ const PackEditor = {
 
   _insertContainer() {
     const selected = this.selected;
+    if (selected?.matches?.(".pack-column")) return selected;
+    const fromColumn = selected?.closest?.(".pack-column") || this.anchor?.closest?.(".pack-column");
+    if (fromColumn) return fromColumn;
     if (selected?.matches?.(".content-card")) return selected;
     const fromSelected = selected?.closest?.(".content-card");
     if (fromSelected) return fromSelected;
@@ -420,7 +679,12 @@ const PackEditor = {
     } else if (action === "delete") {
       if (!this.doc().defaultView.confirm("Delete this block?")) return false;
       const parent = block.parentNode;
+      const parentGrid = block.matches(".pack-column") ? block.parentElement : null;
       block.remove();
+      if (parentGrid) {
+        if (!parentGrid.querySelector(":scope > .pack-column")) parentGrid.remove();
+        else this._syncColumnVar(parentGrid);
+      }
       this.selected = parent?.querySelector(BLOCK_SELECTOR)
         || (parent?.matches?.(BLOCK_SELECTOR) ? parent : null);
     } else if (action === "hide") {
@@ -438,6 +702,10 @@ const PackEditor = {
       if (!extra || extra === "magenta") block.removeAttribute("data-tone");
       else block.setAttribute("data-tone", extra);
     }
+    const grid = this.selected?.matches?.(".pack-columns")
+      ? this.selected
+      : this.selected?.closest?.(".pack-columns");
+    if (grid && this.root()?.contains(grid)) this._syncColumnVar(grid);
     this._prepare();
     if (this.selected) this._select(this.selected);
     this._changed();
@@ -471,7 +739,17 @@ const PackEditor = {
     if (!root || !doc) return;
     this.loadedId = this.pendingId;
     root.setAttribute("contenteditable", "true");
+    this._wrapLooseImages();
     root.querySelectorAll(BLOCK_SELECTOR).forEach((el) => el.setAttribute("data-layout-block", "true"));
+    root.querySelectorAll(".pack-image").forEach((figure) => {
+      figure.setAttribute("contenteditable", "false");
+      if (!figure.querySelector(".pack-image-handle")) {
+        const handle = doc.createElement("span");
+        handle.className = "pack-image-handle";
+        handle.setAttribute("contenteditable", "false");
+        figure.appendChild(handle);
+      }
+    });
     root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container").forEach((el) => {
       const lock = el.closest(".code-fold, .code-container, .diagram-container") || el;
       lock.setAttribute("contenteditable", "false");
@@ -506,6 +784,12 @@ const PackEditor = {
         const code = event.target.closest?.("pre code") || event.target.closest?.("pre")?.querySelector("code");
         if (code && typeof PackSyntax !== "undefined") PackSyntax.paint(code);
       });
+      root.addEventListener("mousedown", (event) => {
+        const handle = event.target.closest(".pack-image-handle");
+        if (!handle) return;
+        const figure = handle.closest(".pack-image");
+        if (figure) this._startImageResize(event, figure);
+      });
       root.addEventListener("dblclick", (event) => {
         const diagram = event.target.closest(".diagram-container");
         if (!diagram) return;
@@ -525,6 +809,48 @@ const PackEditor = {
       }
     }
     this.onSelect(this.selectionInfo());
+    if (this.historyIndex < 0 && !this._historyPaused) this._pushHistory();
+  },
+
+  _wrapLooseImages() {
+    const root = this.root();
+    const doc = this.doc();
+    if (!root || !doc) return;
+    root.querySelectorAll("img").forEach((img) => {
+      if (img.closest(".pack-image, .diagram-container, .brand-lockup, table, .hero, .site-header")) return;
+      const figure = doc.createElement("figure");
+      figure.className = "pack-image pack-image-center";
+      figure.style.setProperty("--pack-image-width", "80%");
+      const parent = img.parentElement;
+      if (parent && parent.matches("p") && parent.children.length === 1 && !parent.textContent.trim()) {
+        parent.replaceWith(figure);
+      } else {
+        img.replaceWith(figure);
+      }
+      figure.appendChild(img);
+    });
+  },
+
+  _startImageResize(event, figure) {
+    event.preventDefault();
+    event.stopPropagation();
+    this._select(figure);
+    const startX = event.clientX;
+    const startW = figure.getBoundingClientRect().width;
+    const parentW = (figure.parentElement?.getBoundingClientRect().width || startW);
+    const grow = figure.classList.contains("pack-image-right") ? -1 : 1;
+    const move = (ev) => {
+      const pct = Math.round(((startW + (ev.clientX - startX) * grow) / parentW) * 100);
+      figure.style.setProperty("--pack-image-width", `${Math.max(10, Math.min(100, pct))}%`);
+    };
+    const stop = () => {
+      this.doc()?.removeEventListener("mousemove", move);
+      this.doc()?.removeEventListener("mouseup", stop);
+      this._changed();
+      this.onSelect(this.selectionInfo());
+    };
+    this.doc().addEventListener("mousemove", move);
+    this.doc().addEventListener("mouseup", stop);
   },
 
   _onClick(event) {
@@ -592,6 +918,17 @@ const PackEditor = {
   },
 
   _onKey(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) this.redo();
+      else this.undo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      this.redo();
+      return;
+    }
     const plain = event.target.closest("[data-plain]");
     if (!plain) return;
     if ((event.ctrlKey || event.metaKey) && ["b", "i", "u"].includes(event.key.toLowerCase())) {
@@ -609,6 +946,9 @@ const PackEditor = {
     if (el.matches(".rule-grid")) return "Icon cards";
     if (el.matches(".card")) return "Contents card";
     if (el.matches(".api-box")) return "API box";
+    if (el.matches(".pack-columns")) return "Columns";
+    if (el.matches(".pack-column, .pack-column *")) return "Column";
+    if (el.matches(".pack-image, .pack-image *")) return "Image";
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
     if (el.matches(".code-fold, .code-container, pre")) return "Code example";
     if (el.matches("table")) return "Table";
@@ -835,5 +1175,76 @@ const PackEditor = {
 
   _changed() {
     this.onChange();
+    this._scheduleHistory();
+  },
+
+  historyInfo() {
+    return {
+      canUndo: this.historyIndex > 0,
+      canRedo: this.historyIndex >= 0 && this.historyIndex < this.history.length - 1,
+    };
+  },
+
+  undo() {
+    if (this._historyTimer) this._pushHistory();
+    if (!this.historyInfo().canUndo) return false;
+    this.historyIndex -= 1;
+    this._restoreHistory();
+    return true;
+  },
+
+  redo() {
+    if (this._historyTimer) this._pushHistory();
+    if (!this.historyInfo().canRedo) return false;
+    this.historyIndex += 1;
+    this._restoreHistory();
+    return true;
+  },
+
+  _resetHistory() {
+    clearTimeout(this._historyTimer);
+    this.history = [];
+    this.historyIndex = -1;
+    this._historyPaused = false;
+    this.onHistory?.(this.historyInfo());
+  },
+
+  _scheduleHistory() {
+    if (this._historyPaused) return;
+    clearTimeout(this._historyTimer);
+    this._historyTimer = setTimeout(() => this._pushHistory(), 400);
+  },
+
+  _pushHistory() {
+    if (this._historyPaused || !this.root()) return;
+    clearTimeout(this._historyTimer);
+    const html = this.flush();
+    if (this.historyIndex >= 0 && this.history[this.historyIndex] === html) {
+      this.onHistory?.(this.historyInfo());
+      return;
+    }
+    this.history = this.history.slice(0, this.historyIndex + 1);
+    this.history.push(html);
+    if (this.history.length > 80) {
+      this.history.shift();
+    }
+    this.historyIndex = this.history.length - 1;
+    this.onHistory?.(this.historyInfo());
+  },
+
+  _restoreHistory() {
+    const root = this.root();
+    if (!root) return;
+    this._historyPaused = true;
+    clearTimeout(this._historyTimer);
+    this.selected = null;
+    this.anchor = null;
+    this.lastTable = null;
+    this.lastDiagram = null;
+    root.innerHTML = this.history[this.historyIndex] || "";
+    this._prepare();
+    this.onChange();
+    this._historyPaused = false;
+    this.onHistory?.(this.historyInfo());
   },
 };
