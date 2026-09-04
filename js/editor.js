@@ -42,6 +42,7 @@ const PackEditor = {
   anchor: null,
   lastTable: null,
   lastDiagram: null,
+  lastCode: null,
   loadedId: null,
   pendingId: null,
   history: [],
@@ -63,6 +64,7 @@ const PackEditor = {
     this.anchor = null;
     this.lastTable = null;
     this.lastDiagram = null;
+    this.lastCode = null;
     this.loadedId = null;
     this.pendingId = pageId || null;
     this._resetHistory();
@@ -324,6 +326,46 @@ const PackEditor = {
     const next = ["left", "center", "right"].includes(align) ? align : "center";
     figure.classList.remove("pack-image-left", "pack-image-center", "pack-image-right");
     figure.classList.add(`pack-image-${next}`);
+    this._changed();
+    return true;
+  },
+
+  codeFromSelection() {
+    if (this.selected?.matches?.(".code-fold, .code-container")) return this.selected;
+    const nested = this.selected?.closest?.(".code-fold, .code-container");
+    if (nested) return nested;
+    const node = this.doc()?.getSelection()?.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const fromCaret = el?.closest?.(".code-fold, .code-container");
+    if (fromCaret) return fromCaret;
+    return null;
+  },
+
+  codeInfo() {
+    const block = this.codeFromSelection();
+    if (!block) return null;
+    const summary = block.matches("details") ? block.querySelector(":scope > summary") : null;
+    const headerTitle = block.querySelector(".code-header > span");
+    const title = (summary?.textContent || headerTitle?.textContent || "").replace(/\s+/g, " ").trim();
+    return { title };
+  },
+
+  setCodeTitle(title) {
+    const block = this.codeFromSelection();
+    if (!block) return false;
+    const next = String(title ?? "");
+    const summary = block.matches("details") ? block.querySelector(":scope > summary") : null;
+    if (summary) summary.textContent = next;
+    let headerTitle = block.querySelector(".code-header > span:first-child");
+    if (!headerTitle) {
+      const header = block.querySelector(".code-header");
+      if (header) {
+        headerTitle = this.doc().createElement("span");
+        header.prepend(headerTitle);
+      }
+    }
+    if (headerTitle) headerTitle.textContent = next;
+    if (!summary && !headerTitle) return false;
     this._changed();
     return true;
   },
@@ -858,6 +900,8 @@ const PackEditor = {
     if (table) this.lastTable = table;
     const diagram = event.target.closest(".diagram-container");
     if (diagram) this.lastDiagram = diagram;
+    const code = event.target.closest(".code-fold, .code-container");
+    if (code) this.lastCode = code;
     const locked = event.target.closest("[data-protected]");
     const fromClick = event.target.closest(`${FLOW_SELECTOR}, [data-layout-block]`);
     this.anchor = locked || fromClick || this.anchor;
@@ -1241,6 +1285,7 @@ const PackEditor = {
     this.anchor = null;
     this.lastTable = null;
     this.lastDiagram = null;
+    this.lastCode = null;
     root.innerHTML = this.history[this.historyIndex] || "";
     this._prepare();
     this.onChange();

@@ -932,6 +932,13 @@ PackEditor.bind(els.editor, {
     if (tableTools) tableTools.hidden = !isTable;
     const diagramTools = document.getElementById("diagram-tools");
     if (diagramTools) diagramTools.hidden = !isDiagram;
+    const codeTools = document.getElementById("code-tools");
+    const code = PackEditor.codeInfo();
+    const codeTitle = document.getElementById("code-title");
+    if (codeTools) codeTools.hidden = !code;
+    if (code && codeTitle && document.activeElement !== codeTitle) {
+      codeTitle.value = code.title;
+    }
     const imageTools = document.getElementById("image-tools");
     const image = PackEditor.imageInfo();
     if (imageTools) imageTools.hidden = !image;
@@ -943,6 +950,8 @@ PackEditor.bind(els.editor, {
     renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+    } else if (code) {
+      els.editorHint.textContent = "Code selected. Change the title here. The code itself stays plain text.";
     } else if (image) {
       els.editorHint.textContent = "Image selected. Change size or position here, drag the purple corner, or use Block arrows to move it.";
     } else if (columns && columns.hasGrid) {
@@ -1435,6 +1444,10 @@ document.getElementById("btn-card-icon").addEventListener("click", async (event)
 
 document.getElementById("card-label").addEventListener("input", (event) => {
   PackEditor.setCardLabel(event.target.value);
+});
+
+document.getElementById("code-title").addEventListener("input", (event) => {
+  PackEditor.setCodeTitle(event.target.value);
 });
 
 document.getElementById("btn-renumber-sections").addEventListener("click", () => {

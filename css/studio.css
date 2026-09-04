@@ -658,6 +658,7 @@ h2.section:first-child {
   width: 90px;
 }
 
+#code-title,
 #image-alt-edit {
   width: 10em;
   border: 1px solid var(--border);
@@ -667,6 +668,10 @@ h2.section:first-child {
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--charcoal);
+}
+
+#code-title {
+  width: 16em;
 }
 
 .image-modal {
