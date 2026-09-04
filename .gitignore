@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+.env.*
+inbox/*
+!inbox/.gitkeep
+source/
+dist/
+index.html
+*.zip
+*.pptx
+.cursor/
+graphify-out/

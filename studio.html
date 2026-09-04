@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client pack builder | Edenred Payment Solutions</title>
+  <link rel="stylesheet" href="css/studio.css">
+</head>
+<body>
+  <header class="studio-header">
+    <div class="studio-brand">
+      <img src="https://eps.edenred.com/hubfs/EPS-Red.svg" alt="Edenred Payment Solutions">
+      <div class="studio-title">
+        <strong>Client pack builder</strong>
+        <span>Drop HTML or Word specs, edit, then download one file</span>
+      </div>
+    </div>
+    <div class="studio-actions">
+      <span class="status" id="status"></span>
+      <button class="btn" id="btn-preview" type="button">Refresh preview</button>
+      <button class="btn btn-primary" id="btn-download" type="button" disabled>Download HTML</button>
+    </div>
+  </header>
+
+  <div class="studio-app">
+    <aside class="panel panel-left">
+      <h2 class="section">Source files</h2>
+      <div class="dropzone" id="dropzone" tabindex="0">
+        <strong>Drop HTML or Word files here</strong>
+        <p>Confluence HTML and Word files (.doc or .docx) are converted automatically. Drop images too, or a Word file with pictures inside it.</p>
+        <input id="file-input" type="file" accept=".html,.doc,.docx,.png,.jpg,.jpeg,.gif,.svg,.webp,text/html,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
+      </div>
+      <div class="studio-actions" style="margin-top:10px; justify-content:flex-start;">
+        <button class="btn btn-quiet" id="btn-import-local" type="button">Import from this project</button>
+      </div>
+      <div id="file-list"></div>
+
+      <details class="fold" open>
+        <summary>Pack settings</summary>
+      <div class="field">
+        <label for="page-title">Browser tab title</label>
+        <input id="page-title" type="text" value="DARWIN VCN Usage Flows | Edenred Payment Solutions">
+      </div>
+      <div class="field">
+        <label for="header-doc">Header label</label>
+        <input id="header-doc" type="text" value="DARWIN VCN · Technical documentation">
+      </div>
+      <div class="field">
+        <label for="logo-url">Logo URL</label>
+        <input id="logo-url" type="text" value="https://eps.edenred.com/hubfs/EPS-Red.svg">
+      </div>
+      <div class="field">
+        <label for="logo-alt">Logo alt text</label>
+        <input id="logo-alt" type="text" value="Edenred Payment Solutions">
+      </div>
+      <label class="check">
+        <input id="confidential" type="checkbox" checked>
+        Show Confidential badge
+      </label>
+      <div class="field">
+        <label for="footer">Footer</label>
+        <textarea id="footer">Edenred Payment Solutions &bull; DARWIN Virtual Card Number documentation &bull; Confidential — for authorised clients only</textarea>
+      </div>
+      <div class="field">
+        <label for="output-filename">Download file name</label>
+        <input id="output-filename" type="text" value="documentation.html">
+      </div>
+      </details>
+
+      <details class="fold" open>
+        <summary>Design</summary>
+        <div class="swatch-grid">
+          <label>Brand <input id="theme-magenta" type="color" value="#FD0966"></label>
+          <label>Background <input id="theme-cream" type="color" value="#F2EEE2"></label>
+          <label>Text <input id="theme-olive" type="color" value="#404C37"></label>
+          <label>Headings <input id="theme-charcoal" type="color" value="#201D22"></label>
+          <label>Accent <input id="theme-violet" type="color" value="#7E6DE2"></label>
+          <label>Muted <input id="theme-taupe" type="color" value="#857D6B"></label>
+          <label>Surface <input id="theme-white" type="color" value="#FFFDFD"></label>
+          <label>Highlight <input id="theme-peach" type="color" value="#FFE8DD"></label>
+        </div>
+        <div class="field">
+          <label for="theme-font">Body font</label>
+          <select id="theme-font">
+            <option value="Arial, Helvetica, sans-serif" selected>Arial</option>
+            <option value="Georgia, 'Times New Roman', serif">Georgia</option>
+            <option value="'Trebuchet MS', Helvetica, sans-serif">Trebuchet</option>
+            <option value="Verdana, Geneva, sans-serif">Verdana</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="theme-content-width">Content width (px)</label>
+          <input id="theme-content-width" type="text" value="1100">
+        </div>
+        <div class="field">
+          <label for="theme-sidebar-width">Sidebar width (px)</label>
+          <input id="theme-sidebar-width" type="text" value="280">
+        </div>
+        <div class="field">
+          <label for="theme-radius">Corner radius (px)</label>
+          <input id="theme-radius" type="text" value="14">
+        </div>
+      </details>
+    </aside>
+
+    <section class="panel-right">
+      <div class="tabs">
+        <button type="button" class="active" data-tab="preview">Preview</button>
+        <button type="button" data-tab="edit">Edit selected page</button>
+      </div>
+      <div class="workspace" id="workspace-preview">
+        <iframe id="preview" title="Client pack preview" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+      </div>
+      <div class="workspace" id="workspace-edit" hidden>
+        <div class="editor-toolbar" id="text-toolbar">
+          <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+          <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+          <span class="toolbar-split"></span>
+          <button type="button" data-cmd="formatBlock" data-value="p">Text</button>
+          <button type="button" data-cmd="formatBlock" data-value="h2">H2</button>
+          <button type="button" data-cmd="formatBlock" data-value="h3">H3</button>
+          <button type="button" data-cmd="formatBlock" data-value="h4">H4</button>
+          <span class="toolbar-split"></span>
+          <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+          <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+          <button type="button" data-cmd="createLink" title="Link">Link</button>
+          <button type="button" id="btn-icon-picker" title="Insert icon">Icon</button>
+          <span class="toolbar-split"></span>
+          <button type="button" class="swatch" data-cmd="foreColor" data-value="#FD0966" title="Brand colour" style="background:#FD0966"></button>
+          <button type="button" class="swatch" data-cmd="foreColor" data-value="#201D22" title="Charcoal" style="background:#201D22"></button>
+          <button type="button" class="swatch" data-cmd="foreColor" data-value="#404C37" title="Olive" style="background:#404C37"></button>
+          <button type="button" class="swatch" data-cmd="foreColor" data-value="#7E6DE2" title="Violet" style="background:#7E6DE2"></button>
+          <div id="icon-picker" class="icon-picker" hidden>
+            <input id="icon-search" type="search" placeholder="Search icons">
+            <div id="icon-grid"></div>
+          </div>
+        </div>
+        <div class="editor-toolbar layout-bar" id="layout-toolbar">
+          <span class="toolbar-label">Layout</span>
+          <button type="button" data-layout="up">↑</button>
+          <button type="button" data-layout="down">↓</button>
+          <button type="button" data-layout="duplicate">Duplicate</button>
+          <button type="button" data-layout="delete">Delete</button>
+          <button type="button" data-layout="hide">Hide / show</button>
+          <span class="toolbar-split"></span>
+          <button type="button" data-layout="width" data-value="">Default</button>
+          <button type="button" data-layout="width" data-value="layout-narrow">Narrow</button>
+          <button type="button" data-layout="width" data-value="layout-wide">Wide</button>
+          <button type="button" data-layout="align" data-value="center">Center</button>
+          <button type="button" data-layout="space" data-value="">Space</button>
+          <button type="button" data-layout="space" data-value="layout-space-lg">More space</button>
+          <span class="toolbar-split"></span>
+          <button type="button" data-insert="paragraph">+ Paragraph</button>
+          <button type="button" data-insert="heading">+ Heading</button>
+          <button type="button" data-insert="callout">+ Note</button>
+          <button type="button" data-insert="warning">+ Warning</button>
+          <button type="button" data-insert="rules">+ Icon cards</button>
+          <button type="button" data-insert="table">+ Table</button>
+          <button type="button" data-insert="code">+ Code</button>
+          <button type="button" data-insert="api">+ API</button>
+          <button type="button" data-insert="checklist">+ Checklist</button>
+          <button type="button" data-insert="diagram">+ Diagram</button>
+          <button type="button" id="btn-edit-diagram">Edit diagram</button>
+          <button type="button" data-layout="add-row">+ Table row</button>
+          <button type="button" data-layout="add-col">+ Table column</button>
+          <span class="toolbar-split"></span>
+          <button type="button" data-insert="card">+ Section</button>
+        </div>
+        <div class="editor-hint" id="editor-hint">Select a page, then click text to edit. Code examples and tables stay plain text so their structure is preserved.</div>
+        <iframe id="editor" title="Page editor"></iframe>
+      </div>
+    </section>
+  </div>
+
+  <div id="diagram-modal" class="diagram-modal" hidden>
+    <div class="diagram-sheet">
+      <header class="diagram-head">
+        <div>
+          <strong>Diagram editor</strong>
+          <span>Drag arrows from a box side or empty space. Click an arrow to bend it, reverse it, or move its ends.</span>
+        </div>
+        <div class="studio-actions">
+          <button class="btn" type="button" id="diagram-cancel">Cancel</button>
+          <button class="btn btn-primary" type="button" id="diagram-apply">Save diagram</button>
+        </div>
+      </header>
+      <div class="diagram-tools">
+        <span class="toolbar-label">Tools</span>
+        <button type="button" data-dtool="select" class="active">Select</button>
+        <button type="button" data-dtool="box">Box</button>
+        <button type="button" data-dtool="round">Pill</button>
+        <button type="button" data-dtool="diamond">Decision</button>
+        <button type="button" data-dtool="arrow">Arrow</button>
+        <span id="diagram-arrow-hint" class="diagram-hint" hidden>Drag from a box side or empty space. Drop on another box or anywhere.</span>
+        <button type="button" id="diagram-delete">Delete</button>
+        <span class="toolbar-split"></span>
+        <span class="toolbar-label">Colour</span>
+        <button type="button" class="swatch" data-dfill="#201D22" style="background:#201D22" title="Charcoal"></button>
+        <button type="button" class="swatch" data-dfill="#404C37" style="background:#404C37" title="Olive"></button>
+        <button type="button" class="swatch" data-dfill="#7E6DE2" style="background:#7E6DE2" title="Violet"></button>
+        <button type="button" class="swatch" data-dfill="#FD0966" style="background:#FD0966" title="Magenta"></button>
+        <span class="toolbar-split"></span>
+        <label>W <input id="diagram-width" type="number" min="400" max="1400" step="20"></label>
+        <label>H <input id="diagram-height" type="number" min="160" max="900" step="20"></label>
+      </div>
+      <div class="diagram-props" id="diagram-node-props">
+        <label>Title <input id="diagram-title" type="text"></label>
+        <label>Subtitle <input id="diagram-subtitle" type="text"></label>
+      </div>
+      <div class="diagram-props" id="diagram-edge-props" hidden>
+        <label>Label <input id="diagram-label" type="text" placeholder="Optional, e.g. Yes"></label>
+        <label>Path
+          <select id="diagram-route">
+            <option value="straight">Straight</option>
+            <option value="elbow">Elbow</option>
+          </select>
+        </label>
+        <label>Heads
+          <select id="diagram-heads">
+            <option value="end">Arrow at end</option>
+            <option value="start">Arrow at start</option>
+            <option value="both">Both ends</option>
+            <option value="none">No arrowhead</option>
+          </select>
+        </label>
+        <button type="button" id="diagram-reverse">Reverse</button>
+      </div>
+      <div id="diagram-canvas" class="diagram-canvas"></div>
+    </div>
+  </div>
+
+  <script src="js/icons.js"></script>
+  <script src="js/syntax.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/diagram.js"></script>
+  <script src="js/studio.js"></script>
+</body>
+</html>

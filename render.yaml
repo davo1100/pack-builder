@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: pack-builder
+    runtime: python
+    plan: free
+    pythonVersion: "3.12.8"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python studio.py
+    autoDeploy: true
+    healthCheckPath: /studio.html
