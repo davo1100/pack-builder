@@ -696,6 +696,9 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
       return;
     }
     PackEditor.insert(insert.dataset.insert);
+    if (insert.dataset.insert === "hero") {
+      setStatus("Header box ready — pick a colour and edit the text", "ok");
+    }
     return;
   }
   const button = event.target.closest("button[data-layout]");
@@ -723,8 +726,19 @@ PackEditor.bind(els.editor, {
   onSelect(info) {
     setToolbarLocked(Boolean(info.plain || info.protected));
     const isDiagram = info.label === "Diagram";
+    const header = PackEditor.selected?.matches?.(".hero, .page-header") ? PackEditor.selected : null;
+    const tones = document.getElementById("hero-tones");
+    tones.hidden = !header;
+    if (header) {
+      const tone = header.getAttribute("data-tone") || "magenta";
+      tones.querySelectorAll("button[data-layout='tone']").forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.value === tone);
+      });
+    }
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+    } else if (header) {
+      els.editorHint.textContent = "Header box selected. Pick a colour, then edit the title, description, and labels.";
     } else if (info.plain || info.protected) {
       els.editorHint.textContent = `${info.label}: plain-text only. Structure is locked so the layout stays intact.`;
     } else if (PackEditor.selected?.matches?.(".content-card, .overview-section")) {

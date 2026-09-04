@@ -299,64 +299,138 @@ body:not(:has(:target)) #overview {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Hero / overview                                                            */
+/* Hero / page header boxes                                                   */
 /* -------------------------------------------------------------------------- */
 
-.hero {
-  background: var(--eden-magenta);
-  color: var(--white);
+.hero,
+.page-header {
+  --hero-bg: var(--eden-magenta);
+  --hero-ink: var(--white);
+  --hero-muted: rgba(255, 253, 253, 0.92);
+  --hero-line: rgba(255, 253, 253, 0.22);
+  --hero-spot: rgba(255, 253, 253, 0.14);
+  background: var(--hero-bg);
+  color: var(--hero-ink);
   padding: 48px 44px 40px;
   border-radius: var(--radius-lg);
   margin-bottom: 28px;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 10px 28px rgba(32, 29, 34, 0.08);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
-.hero::after {
+.hero[data-tone="violet"],
+.page-header[data-tone="violet"] {
+  --hero-bg: var(--violet);
+}
+
+.hero[data-tone="olive"],
+.page-header[data-tone="olive"] {
+  --hero-bg: var(--olive);
+}
+
+.hero[data-tone="plum"],
+.page-header[data-tone="plum"] {
+  --hero-bg: var(--plum);
+}
+
+.hero[data-tone="charcoal"],
+.page-header[data-tone="charcoal"] {
+  --hero-bg: var(--charcoal);
+}
+
+.hero[data-tone="mustard"],
+.page-header[data-tone="mustard"] {
+  --hero-bg: var(--mustard);
+  --hero-ink: var(--charcoal);
+  --hero-muted: rgba(32, 29, 34, 0.82);
+  --hero-line: rgba(32, 29, 34, 0.16);
+  --hero-spot: rgba(255, 253, 253, 0.38);
+}
+
+.hero[data-tone="lime"],
+.page-header[data-tone="lime"] {
+  --hero-bg: var(--lime);
+  --hero-ink: var(--charcoal);
+  --hero-muted: rgba(32, 29, 34, 0.82);
+  --hero-line: rgba(32, 29, 34, 0.16);
+  --hero-spot: rgba(255, 253, 253, 0.4);
+}
+
+.hero::after,
+.page-header::after {
   content: "";
   position: absolute;
   width: 280px;
   height: 280px;
   border-radius: 50%;
-  background: rgba(255, 253, 253, 0.12);
+  background: var(--hero-spot);
   right: -60px;
   top: -80px;
   pointer-events: none;
 }
 
-.hero h1 {
+.hero h1,
+.page-header h1 {
   font-size: 2.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;
   margin-bottom: 12px;
-  max-width: 22ch;
+  color: var(--hero-ink);
   position: relative;
   z-index: 1;
 }
 
-.hero p {
+.hero p,
+.page-header > p {
   font-size: 1.05rem;
   max-width: 62ch;
-  opacity: 0.92;
+  color: var(--hero-muted);
   margin-bottom: 22px;
   position: relative;
   z-index: 1;
 }
 
-.hero-meta {
+.hero h1:last-child,
+.page-header h1:last-child,
+.hero p:last-child,
+.page-header > p:last-child {
+  margin-bottom: 0;
+}
+
+.hero a,
+.page-header a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.hero-meta,
+.hero .page-meta,
+.page-header .page-meta,
+.page-header .hero-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 22px;
   font-size: 0.8rem;
-  border-top: 1px solid rgba(255, 253, 253, 0.22);
+  color: var(--hero-muted);
+  border-top: 1px solid var(--hero-line);
   padding-top: 16px;
+  margin-top: 22px;
   position: relative;
   z-index: 1;
 }
 
-.hero-meta strong {
-  color: var(--white);
+.hero-meta strong,
+.hero .page-meta strong,
+.page-header .page-meta strong,
+.page-header .hero-meta strong,
+.hero strong,
+.page-header strong {
+  color: var(--hero-ink);
+  font-weight: 700;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -365,7 +439,6 @@ body:not(:has(:target)) #overview {
 
 .overview-section,
 .content-card,
-.page-header,
 .toc-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -407,7 +480,6 @@ body:not(:has(:target)) #overview {
   margin-top: 4px;
 }
 
-.page-header h1,
 .content-card h2,
 .overview-section h2,
 h2 {
@@ -1092,18 +1164,18 @@ h3 .pack-icon,
     padding: 20px 16px 48px;
   }
 
-  .hero {
+  .hero,
+  .page-header {
     padding: 28px 22px;
   }
 
-  .hero h1 {
+  .hero h1,
+  .page-header h1 {
     font-size: 1.6rem;
-    max-width: none;
   }
 
   .overview-section,
   .content-card,
-  .page-header,
   .toc-card {
     padding: 20px 18px;
   }
@@ -1131,10 +1203,29 @@ h3 .pack-icon,
     page-break-after: always;
   }
 
-  .hero {
+  .hero,
+  .page-header {
     background: var(--cream) !important;
     color: var(--charcoal) !important;
     border: 2px solid var(--eden-magenta);
+    box-shadow: none;
+  }
+
+  .hero::after,
+  .page-header::after {
+    display: none;
+  }
+
+  .hero h1,
+  .page-header h1,
+  .hero p,
+  .page-header > p,
+  .hero-meta,
+  .hero .page-meta,
+  .page-header .page-meta,
+  .hero strong,
+  .page-header strong {
+    color: var(--charcoal) !important;
   }
 
   .code-fold {

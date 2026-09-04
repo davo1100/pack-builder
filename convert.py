@@ -1193,18 +1193,23 @@ class Converter:
             + "\n</ul>\n</div>"
         )
 
-    def page_header(self, title: str, meta: dict[str, str]) -> str:
+    def page_header(self, title: str, meta: dict[str, str], description: str = "") -> str:
         items = []
         if meta.get("author"):
-            items.append(
-                f'<div class="meta-item"><strong>Author:</strong> {html_lib.escape(meta["author"])}</div>'
-            )
+            items.append(f"<span><strong>Author:</strong> {html_lib.escape(meta['author'])}</span>")
         if meta.get("modified"):
             items.append(
-                f'<div class="meta-item"><strong>Last modified:</strong> {html_lib.escape(meta["modified"])}</div>'
+                f"<span><strong>Last modified:</strong> {html_lib.escape(meta['modified'])}</span>"
             )
-        meta_html = f'<div class="page-meta">\n{"".join(items)}\n</div>' if items else ""
-        return f'<div class="page-header">\n<h1>{html_lib.escape(title)}</h1>\n{meta_html}\n</div>'
+        desc_html = f"<p>{html_lib.escape(description)}</p>\n" if description else ""
+        meta_html = f'<div class="hero-meta">\n{" ".join(items)}\n</div>\n' if items else ""
+        return (
+            '<header class="hero">\n'
+            f"<h1>{html_lib.escape(title)}</h1>\n"
+            f"{desc_html}"
+            f"{meta_html}"
+            "</header>"
+        )
 
     def render_sections(self, sections: list[dict]) -> str:
         cards = []

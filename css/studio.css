@@ -416,6 +416,21 @@ h2.section:first-child {
   border-radius: 50%;
 }
 
+.editor-toolbar button.swatch.is-active {
+  outline: 2px solid var(--charcoal);
+  outline-offset: 2px;
+}
+
+.tone-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tone-bar[hidden] {
+  display: none !important;
+}
+
 .toolbar-split {
   width: 1px;
   height: 18px;

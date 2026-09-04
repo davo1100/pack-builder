@@ -166,7 +166,19 @@
           <button type="button" data-layout="add-row">+ Table row</button>
           <button type="button" data-layout="add-col">+ Table column</button>
           <span class="toolbar-split"></span>
+          <button type="button" data-insert="hero">+ Header</button>
           <button type="button" data-insert="card">+ Section</button>
+          <span id="hero-tones" class="tone-bar" hidden>
+            <span class="toolbar-split"></span>
+            <span class="toolbar-label">Colour</span>
+            <button type="button" class="swatch" data-layout="tone" data-value="magenta" title="Magenta" style="background:#FD0966"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="violet" title="Violet" style="background:#7E6DE2"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="olive" title="Olive" style="background:#404C37"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="plum" title="Plum" style="background:#521D39"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="charcoal" title="Charcoal" style="background:#201D22"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="mustard" title="Mustard" style="background:#DCC606"></button>
+            <button type="button" class="swatch" data-layout="tone" data-value="lime" title="Lime" style="background:#93CD8F"></button>
+          </span>
         </div>
         <div class="editor-hint" id="editor-hint">Select a page, then click text to edit. Code examples and tables stay plain text so their structure is preserved.</div>
         <iframe id="editor" title="Page editor"></iframe>

@@ -18,7 +18,7 @@ const BLOCK_SELECTOR = [
 
 const PAGE_SECTION_SELECTOR = ".content-card, .overview-section, .page-header, .hero, .toc-card";
 const FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote, details";
-const PAGE_LEVEL_KINDS = new Set(["card"]);
+const PAGE_LEVEL_KINDS = new Set(["card", "hero"]);
 
 const PROTECTED_SELECTOR = [
   "pre",
@@ -174,6 +174,16 @@ const PackEditor = {
 
   insert(kind) {
     if (!this.doc()) return;
+    if (kind === "hero") {
+      const root = this.root();
+      const existing = root?.querySelector(".hero, .page-header");
+      if (existing) {
+        this._select(existing);
+        return;
+      }
+      this._placeHtml(this._snippet("hero"), { pageLevel: true, prepend: true });
+      return;
+    }
     const pageLevel = PAGE_LEVEL_KINDS.has(kind);
     const html = this._snippet(kind, { inside: Boolean(!pageLevel && this._insertContainer()) });
     if (!html) return;
@@ -204,6 +214,14 @@ const PackEditor = {
   <div class="rule-item"><h4>${this._icon("globe", 18)} Country Code Limits</h4><p>Restricts allowed countries where authorisations can be processed.</p></div>
 </div>`,
       card: '<div class="content-card"><h2>New section</h2><p>Add copy here.</p></div>',
+      hero: `<header class="hero">
+  <h1>Page title</h1>
+  <p>Short description of this page.</p>
+  <div class="hero-meta">
+    <span><strong>Label:</strong> Value</span>
+    <span><strong>Label:</strong> Value</span>
+  </div>
+</header>`,
       table: `<table class="api-table">
   <tr><th>Label</th><td>Value</td></tr>
   <tr><th>Label</th><td>Value</td></tr>
@@ -265,7 +283,10 @@ const PackEditor = {
     let target = null;
     let position = "beforeend";
 
-    if (pageLevel) {
+    if (options?.prepend) {
+      target = root;
+      position = "afterbegin";
+    } else if (pageLevel) {
       const outer = selected?.closest?.(PAGE_SECTION_SELECTOR) || selected;
       if (outer?.parentNode) {
         target = outer;
@@ -296,7 +317,9 @@ const PackEditor = {
     const template = doc.createElement("template");
     template.innerHTML = html.trim();
     const nodes = [...template.content.childNodes];
-    if (position === "afterend") {
+    if (position === "afterbegin") {
+      target.prepend(...nodes);
+    } else if (position === "afterend") {
       let ref = target;
       nodes.forEach((node) => {
         ref.after(node);
@@ -397,6 +420,10 @@ const PackEditor = {
     } else if (action === "space") {
       block.classList.remove("layout-space-sm", "layout-space-lg");
       if (extra) block.classList.add(extra);
+    } else if (action === "tone") {
+      if (!block.matches(".hero, .page-header")) return false;
+      if (!extra || extra === "magenta") block.removeAttribute("data-tone");
+      else block.setAttribute("data-tone", extra);
     }
     this._prepare();
     if (this.selected) this._select(this.selected);
@@ -561,8 +588,7 @@ const PackEditor = {
 
   _label(el) {
     if (!el) return "Page";
-    if (el.matches(".hero")) return "Hero";
-    if (el.matches(".page-header")) return "Page header";
+    if (el.matches(".hero, .page-header")) return "Header box";
     if (el.matches(".content-card")) return "Content card";
     if (el.matches(".overview-section")) return "Overview section";
     if (el.matches(".toc-card")) return "Table of contents";
