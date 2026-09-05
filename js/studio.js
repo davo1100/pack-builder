@@ -799,11 +799,20 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
     openDiagramEditor(true);
     return;
   }
+  if (event.target.closest("#btn-edit-flow")) {
+    closeInsertMenu();
+    openFlowStudio(true);
+    return;
+  }
   const insert = event.target.closest("button[data-insert]");
   if (insert) {
     closeInsertMenu();
     if (insert.dataset.insert === "diagram") {
       openDiagramEditor(false);
+      return;
+    }
+    if (insert.dataset.insert === "flow") {
+      openFlowStudio(false);
       return;
     }
     if (insert.dataset.insert === "image") {
@@ -911,6 +920,7 @@ PackEditor.bind(els.editor, {
   onSelect(info) {
     setToolbarLocked(Boolean(info.plain || info.protected));
     const isDiagram = info.label === "Diagram";
+    const isFlow = info.label === "API flow";
     const isTable = info.label === "Table";
     const header = PackEditor.selected?.matches?.(".hero, .page-header") ? PackEditor.selected : null;
     const tones = document.getElementById("hero-tones");
@@ -932,6 +942,8 @@ PackEditor.bind(els.editor, {
     if (tableTools) tableTools.hidden = !isTable;
     const diagramTools = document.getElementById("diagram-tools");
     if (diagramTools) diagramTools.hidden = !isDiagram;
+    const flowTools = document.getElementById("flow-tools");
+    if (flowTools) flowTools.hidden = !isFlow;
     const codeTools = document.getElementById("code-tools");
     const code = PackEditor.codeInfo();
     const codeTitle = document.getElementById("code-title");
@@ -950,6 +962,8 @@ PackEditor.bind(els.editor, {
     renderSectionOutline();
     if (isDiagram) {
       els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+    } else if (isFlow) {
+      els.editorHint.textContent = "API flow selected. Click Edit flow, or double-click it to reopen Flow Studio.";
     } else if (code) {
       els.editorHint.textContent = "Code selected. Change the title here. The code itself stays plain text.";
     } else if (image) {
@@ -978,6 +992,9 @@ PackEditor.bind(els.editor, {
   onEditDiagram() {
     openDiagramEditor(true);
   },
+  onEditFlow() {
+    openFlowStudio(true);
+  },
 });
 
 function openDiagramEditor(editExisting) {
@@ -991,6 +1008,27 @@ function openDiagramEditor(editExisting) {
     if (container) PackEditor.replaceDiagram(html);
     else PackEditor.insertHtml(html);
     setStatus("Diagram saved", "ok");
+    schedulePreview(true);
+  });
+}
+
+function openFlowStudio(editExisting) {
+  const container = PackEditor.flowFromSelection();
+  if (editExisting && !container) {
+    setStatus("Click an API flow first, or use + API flow to create one", "error");
+    return;
+  }
+  const model = container ? FlowRender.parseEmbed(container) : FlowIR.empty();
+  if (editExisting && !model) {
+    setStatus("This flow has no saved IR to edit", "error");
+    return;
+  }
+  const apply = document.getElementById("flow-apply");
+  if (apply) apply.textContent = container ? "Update on page" : "Insert on page";
+  FlowStudio.open(model || FlowIR.empty(), (html) => {
+    if (container) PackEditor.replaceFlow(html);
+    else PackEditor.insertHtml(html);
+    setStatus("API flow saved", "ok");
     schedulePreview(true);
   });
 }
@@ -1044,7 +1082,11 @@ document.addEventListener("keydown", (event) => {
     closeImageModal();
     return;
   }
-  if ((event.ctrlKey || event.metaKey) && document.getElementById("diagram-modal").hidden && document.getElementById("image-modal").hidden) {
+  if (!document.getElementById("flow-modal").hidden && event.key === "Escape") {
+    FlowStudio.close();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && document.getElementById("diagram-modal").hidden && document.getElementById("image-modal").hidden && document.getElementById("flow-modal").hidden) {
     const tag = event.target.tagName;
     const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
     const key = event.key.toLowerCase();

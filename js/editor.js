@@ -7,6 +7,7 @@ const BLOCK_SELECTOR = [
   ".card",
   ".api-box",
   ".diagram-container",
+  ".pack-flow",
   ".pack-image",
   ".pack-columns",
   ".pack-column",
@@ -31,6 +32,7 @@ const PROTECTED_SELECTOR = [
   ".code-container",
   ".code-fold",
   ".diagram-container",
+  ".pack-flow",
   ".api-table",
 ].join(", ");
 
@@ -42,6 +44,7 @@ const PackEditor = {
   anchor: null,
   lastTable: null,
   lastDiagram: null,
+  lastFlow: null,
   lastCode: null,
   loadedId: null,
   pendingId: null,
@@ -55,6 +58,7 @@ const PackEditor = {
     this.onChange = handlers.onChange || (() => {});
     this.onSelect = handlers.onSelect || (() => {});
     this.onEditDiagram = handlers.onEditDiagram || (() => {});
+    this.onEditFlow = handlers.onEditFlow || (() => {});
     this.onHistory = handlers.onHistory || (() => {});
     iframe.addEventListener("load", () => this._prepare());
   },
@@ -64,6 +68,7 @@ const PackEditor = {
     this.anchor = null;
     this.lastTable = null;
     this.lastDiagram = null;
+    this.lastFlow = null;
     this.lastCode = null;
     this.loadedId = null;
     this.pendingId = pageId || null;
@@ -215,6 +220,23 @@ const PackEditor = {
     });
     clone.querySelectorAll(".pack-image-handle").forEach((el) => el.remove());
     return clone.innerHTML;
+  },
+
+  _refreshFlows() {
+    const root = this.root();
+    if (!root || typeof FlowRender === "undefined") return;
+    root.querySelectorAll(".pack-flow[data-flow]").forEach((el) => {
+      const model = FlowRender.parseEmbed(el);
+      if (!model) return;
+      const drawn = FlowRender.html(model);
+      if (!drawn.ok || !drawn.html) return;
+      const holder = root.ownerDocument.createElement("div");
+      holder.innerHTML = drawn.html;
+      const next = holder.querySelector(".pack-flow");
+      if (!next) return;
+      el.innerHTML = next.innerHTML;
+      el.setAttribute("data-flow", next.getAttribute("data-flow") || el.getAttribute("data-flow"));
+    });
   },
 
   command(name, value) {
@@ -682,6 +704,27 @@ const PackEditor = {
     this.insertHtml(html);
   },
 
+  flowFromSelection() {
+    return (
+      (this.lastFlow && this.root()?.contains(this.lastFlow) && this.lastFlow) ||
+      this.selected?.closest?.(".pack-flow") ||
+      this.selected?.querySelector?.(".pack-flow") ||
+      null
+    );
+  },
+
+  replaceFlow(html) {
+    const current = this.flowFromSelection();
+    if (current) {
+      current.outerHTML = html;
+      this.lastFlow = null;
+      this._prepare();
+      this._changed();
+      return;
+    }
+    this.insertHtml(html);
+  },
+
   layout(action, extra) {
     if (action === "add-row" || action === "add-col") {
       const table = this._tableFromSelection();
@@ -780,6 +823,7 @@ const PackEditor = {
     const doc = this.doc();
     if (!root || !doc) return;
     this.loadedId = this.pendingId;
+    this._refreshFlows();
     root.setAttribute("contenteditable", "true");
     this._wrapLooseImages();
     root.querySelectorAll(BLOCK_SELECTOR).forEach((el) => el.setAttribute("data-layout-block", "true"));
@@ -792,12 +836,13 @@ const PackEditor = {
         figure.appendChild(handle);
       }
     });
-    root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container").forEach((el) => {
-      const lock = el.closest(".code-fold, .code-container, .diagram-container") || el;
+    root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow").forEach((el) => {
+      const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow") || el;
       lock.setAttribute("contenteditable", "false");
       lock.setAttribute("data-protected", "true");
       if (lock.matches("table") || lock.querySelector("table")) lock.setAttribute("data-lock-label", "Table");
       else if (lock.matches(".diagram-container")) lock.setAttribute("data-lock-label", "Diagram");
+      else if (lock.matches(".pack-flow")) lock.setAttribute("data-lock-label", "API flow");
       else lock.setAttribute("data-lock-label", "Code");
     });
     root.querySelectorAll("pre, pre code").forEach((el) => {
@@ -819,7 +864,10 @@ const PackEditor = {
       root.dataset.bound = "1";
       root.addEventListener("click", (event) => this._onClick(event));
       root.addEventListener("keyup", () => this._changed());
-      root.addEventListener("input", () => this._changed());
+      root.addEventListener("input", (event) => {
+        if (event.target.closest(".pack-flow-radio, .pack-flow-tabs")) return;
+        this._changed();
+      });
       root.addEventListener("paste", (event) => this._onPaste(event));
       root.addEventListener("keydown", (event) => this._onKey(event));
       root.addEventListener("focusout", (event) => {
@@ -833,6 +881,14 @@ const PackEditor = {
         if (figure) this._startImageResize(event, figure);
       });
       root.addEventListener("dblclick", (event) => {
+        const flow = event.target.closest(".pack-flow");
+        if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio")) return;
+        if (flow && (flow.hasAttribute("data-flow") || flow.querySelector("svg"))) {
+          event.preventDefault();
+          this.lastFlow = flow;
+          this.onEditFlow(flow);
+          return;
+        }
         const diagram = event.target.closest(".diagram-container");
         if (!diagram) return;
         if (!diagram.hasAttribute("data-diagram") && !diagram.querySelector("svg")) return;
@@ -859,7 +915,7 @@ const PackEditor = {
     const doc = this.doc();
     if (!root || !doc) return;
     root.querySelectorAll("img").forEach((img) => {
-      if (img.closest(".pack-image, .diagram-container, .brand-lockup, table, .hero, .site-header")) return;
+      if (img.closest(".pack-image, .diagram-container, .pack-flow, .brand-lockup, table, .hero, .site-header")) return;
       const figure = doc.createElement("figure");
       figure.className = "pack-image pack-image-center";
       figure.style.setProperty("--pack-image-width", "80%");
@@ -900,6 +956,8 @@ const PackEditor = {
     if (table) this.lastTable = table;
     const diagram = event.target.closest(".diagram-container");
     if (diagram) this.lastDiagram = diagram;
+    const flow = event.target.closest(".pack-flow");
+    if (flow) this.lastFlow = flow;
     const code = event.target.closest(".code-fold, .code-container");
     if (code) this.lastCode = code;
     const locked = event.target.closest("[data-protected]");
@@ -994,6 +1052,7 @@ const PackEditor = {
     if (el.matches(".pack-column, .pack-column *")) return "Column";
     if (el.matches(".pack-image, .pack-image *")) return "Image";
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
+    if (el.matches(".pack-flow, .pack-flow *")) return "API flow";
     if (el.matches(".code-fold, .code-container, pre")) return "Code example";
     if (el.matches("table")) return "Table";
     if (el.matches(".callout, .callout-warning")) return "Callout";
@@ -1285,6 +1344,7 @@ const PackEditor = {
     this.anchor = null;
     this.lastTable = null;
     this.lastDiagram = null;
+    this.lastFlow = null;
     this.lastCode = null;
     root.innerHTML = this.history[this.historyIndex] || "";
     this._prepare();

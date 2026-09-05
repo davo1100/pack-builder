@@ -211,6 +211,7 @@
               <button type="button" data-insert="image">Image</button>
               <button type="button" data-insert="rules">Icon cards</button>
               <button type="button" data-insert="diagram">Diagram</button>
+              <button type="button" data-insert="flow">API flow</button>
               <p class="insert-heading">Technical</p>
               <button type="button" data-insert="table">Table</button>
               <button type="button" data-insert="code">Code</button>
@@ -238,6 +239,10 @@
           <div class="tool-group tool-context" id="diagram-tools" hidden>
             <span class="toolbar-label">Diagram</span>
             <button type="button" id="btn-edit-diagram">Edit diagram</button>
+          </div>
+          <div class="tool-group tool-context" id="flow-tools" hidden>
+            <span class="toolbar-label">API flow</span>
+            <button type="button" id="btn-edit-flow">Edit flow</button>
           </div>
           <div class="tool-group tool-context" id="code-tools" hidden>
             <span class="toolbar-label">Code title</span>
@@ -381,10 +386,122 @@
     </div>
   </div>
 
+  <div id="flow-modal" class="flow-modal" hidden>
+    <div class="flow-sheet" data-platform="darwin">
+      <header class="flow-head">
+        <div>
+          <strong>Flow Studio</strong>
+          <span>Describe the call. The compiler draws it. Nothing is invented.</span>
+        </div>
+        <div class="studio-actions">
+          <button class="btn" type="button" id="flow-download">Download SVG</button>
+          <button class="btn" type="button" id="flow-cancel">Cancel</button>
+          <button class="btn btn-primary" type="button" id="flow-apply">Insert on page</button>
+        </div>
+      </header>
+      <p id="flow-errors" class="flow-banner" hidden></p>
+      <div class="flow-toolbar">
+        <label>Title <input id="flow-title" type="text"></label>
+        <label>Layout
+          <select id="flow-layout">
+            <option value="sequence">Sequence</option>
+            <option value="architecture">Architecture</option>
+          </select>
+        </label>
+        <label>Platform
+          <select id="flow-platform">
+            <option value="darwin">Darwin (REST)</option>
+            <option value="chopin">Chopin (SOAP)</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+        <span id="flow-protocol-hint" class="flow-protocol-hint">Darwin REST</span>
+        <label class="flow-show-fields"><input id="flow-show-fields" type="checkbox" checked> Show API fields</label>
+      </div>
+      <div class="flow-body">
+        <section class="flow-pane">
+          <h3>Source</h3>
+          <label class="flow-block-label" for="flow-source">JSON IR</label>
+          <textarea id="flow-source" spellcheck="false"></textarea>
+          <details class="flow-import" id="flow-openapi-box">
+            <summary>Import OpenAPI</summary>
+            <textarea id="flow-openapi" spellcheck="false" placeholder="Paste OpenAPI 3 or Swagger 2 JSON or YAML, or upload one or more files"></textarea>
+            <div class="flow-import-actions">
+              <input id="flow-openapi-file" type="file" multiple accept=".json,.yaml,.yml,application/json,text/yaml">
+              <button type="button" id="flow-import-openapi">Read OpenAPI</button>
+              <button type="button" id="flow-openapi-clear" hidden>Clear specs</button>
+            </div>
+            <p id="flow-openapi-files" class="flow-filter-note"></p>
+            <div id="flow-openapi-ops" class="flow-openapi-ops" hidden>
+              <p id="flow-openapi-count" class="flow-filter-note"></p>
+              <div class="flow-import-actions">
+                <input id="flow-openapi-filter" type="search" placeholder="Filter operations">
+                <button type="button" id="flow-openapi-all">Select all</button>
+                <button type="button" id="flow-openapi-none">Select none</button>
+                <button type="button" id="flow-openapi-compile">Compile selected</button>
+              </div>
+              <div id="flow-openapi-list" class="flow-openapi-list"></div>
+            </div>
+          </details>
+          <details class="flow-import" id="flow-wsdl-box">
+            <summary>Import Chopin WSDL</summary>
+            <textarea id="flow-wsdl" spellcheck="false" placeholder="Paste a Chopin SOAP WSDL, or upload one or more .wsdl files"></textarea>
+            <div class="flow-import-actions">
+              <input id="flow-wsdl-file" type="file" multiple accept=".wsdl,.xml,text/xml,application/xml">
+              <button type="button" id="flow-import-wsdl">Read WSDL</button>
+              <button type="button" id="flow-wsdl-clear" hidden>Clear specs</button>
+            </div>
+            <p id="flow-wsdl-files" class="flow-filter-note"></p>
+            <div id="flow-wsdl-ops" class="flow-openapi-ops" hidden>
+              <p id="flow-wsdl-count" class="flow-filter-note"></p>
+              <div class="flow-import-actions">
+                <input id="flow-wsdl-filter" type="search" placeholder="Filter operations">
+                <button type="button" id="flow-wsdl-all">Select all</button>
+                <button type="button" id="flow-wsdl-none">Select none</button>
+                <button type="button" id="flow-wsdl-compile">Compile selected</button>
+              </div>
+              <div id="flow-wsdl-list" class="flow-openapi-list"></div>
+            </div>
+          </details>
+        </section>
+        <section class="flow-pane">
+          <h3>Structure</h3>
+          <div class="flow-structure-section" data-kind="actors">
+            <div class="flow-pane-head">
+              <strong>Actors</strong>
+              <button type="button" id="flow-add-actor">Add actor</button>
+            </div>
+            <div id="flow-actor-colors" class="flow-actor-colors"></div>
+            <div id="flow-actors" class="flow-list"></div>
+          </div>
+          <div class="flow-structure-section" data-kind="steps">
+            <div class="flow-pane-head">
+              <strong>Steps</strong>
+              <select id="flow-add-endpoint" hidden aria-label="Add endpoint from spec">
+                <option value="">Add endpoint…</option>
+              </select>
+              <button type="button" id="flow-add-step">Add step</button>
+            </div>
+            <div id="flow-steps" class="flow-list"></div>
+          </div>
+        </section>
+        <section class="flow-pane flow-preview-pane">
+          <h3>Preview</h3>
+          <p class="flow-filter-note">Published packs keep this developer flow as the source, then offer Business process, Ops, and Developer tabs.</p>
+          <div id="flow-preview" class="flow-preview"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <script src="js/icons.js"></script>
   <script src="js/syntax.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/diagram.js"></script>
+  <script src="js/flow-ir.js"></script>
+  <script src="js/flow-parse.js"></script>
+  <script src="js/flow-render.js"></script>
+  <script src="js/flow-studio.js"></script>
   <script src="js/studio.js"></script>
 </body>
 </html>

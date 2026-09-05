@@ -643,6 +643,71 @@ li {
   text-align: center;
 }
 
+.pack-flow {
+  position: relative;
+  background: var(--cream);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 22px;
+  margin: 16px 0 8px;
+  overflow-x: auto;
+  text-align: left;
+}
+
+.pack-flow-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pack-flow-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.pack-flow-tab {
+  display: inline-block;
+  font: 700 11px Arial, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--olive);
+  cursor: pointer;
+}
+
+.pack-flow:has(.pack-flow-radio[value="process"]:checked) .pack-flow-tab[for$="-process"],
+.pack-flow:has(.pack-flow-radio[value="ops"]:checked) .pack-flow-tab[for$="-ops"],
+.pack-flow:has(.pack-flow-radio[value="developer"]:checked) .pack-flow-tab[for$="-developer"] {
+  background: var(--violet);
+  color: #fff;
+  border-color: var(--violet);
+}
+
+.pack-flow-panel {
+  display: none;
+  overflow-x: auto;
+}
+
+.pack-flow:has(.pack-flow-radio[value="process"]:checked) .pack-flow-panel[data-view="process"],
+.pack-flow:has(.pack-flow-radio[value="ops"]:checked) .pack-flow-panel[data-view="ops"],
+.pack-flow:has(.pack-flow-radio[value="developer"]:checked) .pack-flow-panel[data-view="developer"] {
+  display: block;
+}
+
+.pack-flow svg {
+  display: block;
+  margin: 0;
+  max-width: none;
+  height: auto;
+}
+
 .pack-image {
   display: block;
   width: var(--pack-image-width, 56%);
