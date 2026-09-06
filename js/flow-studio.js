@@ -6,6 +6,15 @@ const FlowStudio = {
   wsdlOps: null,
   onSave: null,
   _syncing: false,
+  _liveTimer: 0,
+  _previewFrame: 0,
+  _previewId: "",
+  _catalogOpts: null,
+  _catalogMemo: null,
+  _endpointOpts: null,
+  _keptEndpoints: null,
+  _keptFieldCatalog: null,
+  _imageFile: null,
 
   open(model, onSave) {
     this.model = FlowIR.normalize(model || FlowIR.empty());
@@ -13,19 +22,31 @@ const FlowStudio = {
     this.customerUndo = null;
     this.onSave = onSave || (() => {});
     document.getElementById("flow-modal").hidden = false;
+    this._rememberCatalogs(this.model);
     this._bindOnce();
     this._renderAll();
   },
 
   close() {
+    clearTimeout(this._liveTimer);
+    if (this._previewFrame) cancelAnimationFrame(this._previewFrame);
+    this._toggleImport(false);
     document.getElementById("flow-modal").hidden = true;
     this.model = null;
     this.backup = null;
     this.customerUndo = null;
     this.onSave = null;
+    this._catalogOpts = null;
+    this._catalogMemo = null;
+    this._endpointOpts = null;
+    this._previewFrame = 0;
+    this._imageFile = null;
+    if (typeof FlowImage?.dispose === "function") FlowImage.dispose();
+    this._clearImage(true);
   },
 
   apply() {
+    clearTimeout(this._liveTimer);
     const checked = FlowIR.validate(this.model);
     if (!checked.ok) {
       this._errors(checked.errors);
@@ -43,7 +64,7 @@ const FlowStudio = {
   },
 
   downloadSvg() {
-    const drawn = FlowRender.svg(FlowIR.forView(this.model, "developer"));
+    const drawn = FlowRender.svg(FlowIR.forView(this.model, "developer"), { source: this.model });
     if (!drawn.ok) {
       this._errors(drawn.errors);
       return;
@@ -68,9 +89,15 @@ const FlowStudio = {
       this._sourceTimer = setTimeout(() => this._fromSource(false), 280);
     });
     document.getElementById("flow-source").addEventListener("blur", () => this._fromSource(true));
+    document.getElementById("flow-source-box")?.addEventListener("toggle", () => this._onSourceToggle());
+    document.getElementById("flow-import-toggle")?.addEventListener("click", () => this._toggleImport());
+    document.getElementById("flow-import-close")?.addEventListener("click", () => this._toggleImport(false));
+    document.getElementById("flow-preview").addEventListener("change", (event) => {
+      if (event.target.classList.contains("pack-flow-radio")) this._paintVisiblePreview();
+    });
     document.getElementById("flow-title").addEventListener("input", (event) => {
       this.model.title = event.target.value;
-      this._afterStructure();
+      this._schedulePreview();
     });
     document.getElementById("flow-layout").addEventListener("change", (event) => {
       this.model.presentation.layout = event.target.value;
@@ -86,9 +113,14 @@ const FlowStudio = {
       this._renderActors();
       this._renderSteps();
       this._syncProtocolChrome();
+      this._renderEndpointPicker();
       this._afterStructure();
     });
-    document.getElementById("flow-add-actor").addEventListener("click", () => this._addActor());
+    document.getElementById("flow-add-actor").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._addActor();
+    });
     document.getElementById("flow-actor-colors").addEventListener("input", (event) => this._onActorColor(event));
     document.getElementById("flow-actor-colors").addEventListener("click", (event) => {
       if (!event.target.closest("[data-actor-colors-reset]")) return;
@@ -96,7 +128,12 @@ const FlowStudio = {
       this._renderActorColors();
       this._afterStructure();
     });
-    document.getElementById("flow-add-step").addEventListener("click", () => this._addStep());
+    document.getElementById("flow-add-step").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._addStep();
+    });
+    document.getElementById("flow-add-endpoint").addEventListener("click", (event) => event.stopPropagation());
     document.getElementById("flow-add-endpoint").addEventListener("change", (event) => this._addFromEndpoint(event.target.value));
     document.getElementById("flow-import-openapi").addEventListener("click", () => this._readOpenApi());
     document.getElementById("flow-openapi-clear").addEventListener("click", () => this._clearOpenApi());
@@ -114,12 +151,49 @@ const FlowStudio = {
     document.getElementById("flow-wsdl-list").addEventListener("change", () => this._wsdlCount());
     document.getElementById("flow-openapi-file").addEventListener("change", (event) => this._readOpenApiFiles(event));
     document.getElementById("flow-wsdl-file").addEventListener("change", (event) => this._readWsdlFiles(event));
-    document.getElementById("flow-actors").addEventListener("input", (event) => this._onActorField(event));
+    document.getElementById("flow-image-choose").addEventListener("click", () => document.getElementById("flow-image-file").click());
+    document.getElementById("flow-image-file").addEventListener("change", (event) => this._readImageFile(event));
+    document.getElementById("flow-image-compile").addEventListener("click", () => this._compileImage());
+    document.getElementById("flow-image-clear").addEventListener("click", () => this._clearImage());
+    const drop = document.getElementById("flow-image-drop");
+    drop.addEventListener("click", () => document.getElementById("flow-image-file").click());
+    drop.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        document.getElementById("flow-image-file").click();
+      }
+    });
+    ["dragenter", "dragover"].forEach((type) => {
+      drop.addEventListener(type, (event) => {
+        event.preventDefault();
+        drop.classList.add("is-over");
+      });
+    });
+    ["dragleave", "drop"].forEach((type) => {
+      drop.addEventListener(type, () => drop.classList.remove("is-over"));
+    });
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer?.files?.[0];
+      if (file) this._acceptImage(file);
+    });
+    document.addEventListener("paste", (event) => this._onImagePaste(event));
+    document.getElementById("flow-actors").addEventListener("input", (event) => {
+      if (event.target.tagName === "SELECT") return;
+      this._onActorField(event);
+    });
     document.getElementById("flow-actors").addEventListener("change", (event) => this._onActorField(event));
     document.getElementById("flow-actors").addEventListener("click", (event) => this._onActorClick(event));
-    document.getElementById("flow-steps").addEventListener("input", (event) => this._onStepField(event));
+    document.getElementById("flow-steps").addEventListener("input", (event) => {
+      if (event.target.tagName === "SELECT") return;
+      this._onStepField(event);
+    });
     document.getElementById("flow-steps").addEventListener("change", (event) => this._onStepField(event));
     document.getElementById("flow-steps").addEventListener("click", (event) => this._onStepClick(event));
+    document.getElementById("flow-steps").addEventListener("dragstart", (event) => this._onStepDragStart(event));
+    document.getElementById("flow-steps").addEventListener("dragover", (event) => this._onStepDragOver(event));
+    document.getElementById("flow-steps").addEventListener("drop", (event) => this._onStepDrop(event));
+    document.getElementById("flow-steps").addEventListener("dragend", () => this._onStepDragEnd());
   },
 
   _renderAll() {
@@ -128,34 +202,167 @@ const FlowStudio = {
     document.getElementById("flow-layout").value = this.model.presentation.layout;
     document.getElementById("flow-platform").value = this.model.presentation.platform;
     document.getElementById("flow-show-fields").checked = this.model.presentation.showFields !== false;
-    document.getElementById("flow-source").value = JSON.stringify(this.model, null, 2);
+    this._writeSourceIfOpen();
+    this._syncImplementations();
     this._renderActorColors();
     this._renderActors();
     this._renderSteps();
     this._renderEndpointPicker();
     this._syncProtocolChrome();
-    this._preview();
+    this._ensurePreviewShell();
     this._syncing = false;
+    this._paintVisiblePreview();
   },
 
   _afterStructure() {
     if (this._syncing) return;
     this._syncImplementations();
-    this.model = FlowIR.normalize(this.model);
+    this._writeSourceIfOpen();
+    this._schedulePreview();
+  },
+
+  _isTextControl(el) {
+    if (!el || el.tagName === "SELECT") return false;
+    return el.type !== "checkbox" && el.type !== "radio" && el.type !== "file";
+  },
+
+  _schedulePreview() {
+    if (this._previewFrame) return;
+    this._previewFrame = requestAnimationFrame(() => {
+      this._previewFrame = 0;
+      this._paintVisiblePreview();
+    });
+  },
+
+  _ensurePreviewShell() {
+    const host = document.getElementById("flow-preview");
+    if (host.querySelector(".pack-flow")) return host;
+    this._previewId = this._previewId || FlowRender.uid("pf");
+    const id = this._previewId;
+    const radios = FlowIR.VIEWERS.map(
+      (view, index) =>
+        `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${index === 0 ? " checked" : ""}>`
+    ).join("");
+    const tabs = `<div class="pack-flow-tabs" role="tablist">${FlowIR.VIEWERS.map(
+      (view) => `<label class="pack-flow-tab" for="${id}-${view.key}">${this._esc(view.label)}</label>`
+    ).join("")}</div>`;
+    const panels = FlowIR.VIEWERS.map((view) => `<div class="pack-flow-panel" data-view="${view.key}"></div>`).join("");
+    host.innerHTML = `<div class="pack-flow">${radios}${tabs}${panels}</div>`;
+    return host;
+  },
+
+  _paintVisiblePreview() {
+    if (!this.model) return;
+    const host = this._ensurePreviewShell();
+    const selected = host.querySelector(".pack-flow-radio:checked")?.value || "process";
+    const drawn = FlowRender.svg(FlowRender.viewModel(this.model, selected), { trusted: true });
+    const panel = host.querySelector(`.pack-flow-panel[data-view="${selected}"]`);
+    if (!drawn.ok) {
+      this._errors(drawn.errors);
+      if (panel) panel.innerHTML = `<p class="flow-error">${this._esc(drawn.errors.join(" · "))}</p>`;
+      return;
+    }
+    this._errors([]);
+    if (panel) panel.innerHTML = drawn.svg;
+  },
+
+  _rememberCatalogs(model) {
+    if (!model) return;
+    if (Array.isArray(model.fieldCatalog) && model.fieldCatalog.length) this._keptFieldCatalog = model.fieldCatalog;
+    this._keptEndpoints = this._keptEndpoints || {};
+    (model.endpoints || []).forEach((item) => {
+      if (item.requestFields || item.responseFields || item.okFields || item.errFields || item.serverFields) {
+        this._keptEndpoints[item.key] = {
+          requestFields: item.requestFields,
+          responseFields: item.responseFields,
+          okFields: item.okFields,
+          errFields: item.errFields,
+          serverFields: item.serverFields,
+        };
+      }
+    });
+  },
+
+  _restoreCatalogs(model) {
+    if (!model) return;
+    if (!model.fieldCatalog?.length && this._keptFieldCatalog) model.fieldCatalog = this._keptFieldCatalog;
+    (model.endpoints || []).forEach((item) => {
+      const kept = this._keptEndpoints?.[item.key];
+      if (!kept) return;
+      ["requestFields", "responseFields", "okFields", "errFields", "serverFields"].forEach((key) => {
+        if (!item[key]?.length && kept[key]) item[key] = kept[key];
+      });
+    });
+  },
+
+  _sourcePayload() {
+    this._rememberCatalogs(this.model);
+    return {
+      ...this.model,
+      fieldCatalog: undefined,
+      endpoints: (this.model.endpoints || []).map((item) => ({
+        key: item.key,
+        method: item.method,
+        path: item.path,
+        protocol: item.protocol,
+        operation: item.operation,
+        namespace: item.namespace,
+        soapAction: item.soapAction,
+        summary: item.summary,
+        operationId: item.operationId,
+        tags: item.tags,
+        source: item.source,
+        okCode: item.okCode,
+        errCode: item.errCode,
+        serverCode: item.serverCode,
+        okLabel: item.okLabel,
+        errLabel: item.errLabel,
+        serverLabel: item.serverLabel,
+      })),
+    };
+  },
+
+  _writeSourceIfOpen() {
+    const box = document.getElementById("flow-source-box");
+    if (!box?.open) return;
     this._syncing = true;
-    document.getElementById("flow-source").value = JSON.stringify(this.model, null, 2);
+    document.getElementById("flow-source").value = JSON.stringify(this._sourcePayload(), null, 2);
     this._syncing = false;
-    this._preview();
+  },
+
+  _toggleImport(open) {
+    const drawer = document.getElementById("flow-import-drawer");
+    const button = document.getElementById("flow-import-toggle");
+    if (!drawer) return;
+    if (open === true) drawer.hidden = false;
+    else if (open === false) drawer.hidden = true;
+    else drawer.hidden = !drawer.hidden;
+    if (button) button.setAttribute("aria-expanded", String(!drawer.hidden));
+    if (!drawer.hidden) this._writeSourceIfOpen();
+  },
+
+  _onSourceToggle() {
+    const box = document.getElementById("flow-source-box");
+    const source = document.getElementById("flow-source");
+    if (!box || !source) return;
+    if (box.open) this._writeSourceIfOpen();
+    else source.value = "";
   },
 
   _fromSource(rebuild) {
     if (this._syncing) return;
-    const parsed = FlowParse.fromJson(document.getElementById("flow-source").value);
+    const box = document.getElementById("flow-source-box");
+    if (box && !box.open) return;
+    const text = document.getElementById("flow-source").value;
+    if (!String(text || "").trim()) return;
+    const parsed = FlowParse.fromJson(text);
     if (!parsed.ok) {
       this._errors(parsed.errors);
       return;
     }
+    this._restoreCatalogs(parsed.model);
     this.model = parsed.model;
+    this._rememberCatalogs(this.model);
     this._syncing = true;
     document.getElementById("flow-title").value = this.model.title || "";
     document.getElementById("flow-layout").value = this.model.presentation.layout;
@@ -167,26 +374,9 @@ const FlowStudio = {
       this._renderSteps();
     }
     this._syncProtocolChrome();
+    this._renderEndpointPicker();
     this._syncing = false;
-    this._preview();
-  },
-
-  _preview() {
-    const checked = FlowIR.validate(this.model);
-    const host = document.getElementById("flow-preview");
-    if (!checked.ok) {
-      this._errors(checked.errors);
-      host.innerHTML = `<p class="flow-error">${this._esc(checked.errors.join(" · "))}</p>`;
-      return;
-    }
-    const drawn = FlowRender.html(checked.model);
-    if (!drawn.ok) {
-      this._errors(drawn.errors);
-      host.innerHTML = `<p class="flow-error">${this._esc(drawn.errors.join(" · "))}</p>`;
-      return;
-    }
-    this._errors([]);
-    host.innerHTML = drawn.html;
+    this._paintVisiblePreview();
   },
 
   _errors(list) {
@@ -201,6 +391,7 @@ const FlowStudio = {
   },
 
   _addActor() {
+    document.querySelector('.flow-structure-section[data-kind="actors"]')?.setAttribute("open", "");
     this.model.actors.push({ id: FlowIR.uid("a"), name: "New actor", type: "internal" });
     this._renderActors();
     this._renderSteps();
@@ -208,6 +399,7 @@ const FlowStudio = {
   },
 
   _addStep() {
+    document.querySelector('.flow-structure-section[data-kind="steps"]')?.setAttribute("open", "");
     const actors = this.model.actors;
     const platform = this.model.presentation.platform;
     const from = actors.find((actor) => actor.type === "client")?.id || actors[0]?.id || "";
@@ -281,9 +473,11 @@ const FlowStudio = {
     return title ? `${item.method} ${item.path} · ${title}${source}` : `${item.method} ${item.path}${source}`;
   },
 
-  _endpointOptions(selected) {
-    const groups = {};
+  _endpointOptionsHtml() {
     const endpoints = this._visibleEndpoints();
+    const key = `${this.model.presentation.platform}|${endpoints.map((item) => item.key).join("\n")}`;
+    if (this._endpointOpts?.key === key) return this._endpointOpts.html;
+    const groups = {};
     const useSource = endpoints.some((item) => item.source);
     endpoints.forEach((item) => {
       const group = useSource ? item.source || item.tags?.[0] || "API" : item.tags?.[0] || "API";
@@ -293,13 +487,22 @@ const FlowStudio = {
     Object.keys(groups).forEach((group) => {
       parts.push(`<optgroup label="${this._esc(group)}">`);
       groups[group].forEach((item) => {
-        parts.push(
-          `<option value="${this._esc(item.key)}"${item.key === selected ? " selected" : ""}>${this._esc(this._endpointLabel(item))}</option>`
-        );
+        parts.push(`<option value="${this._esc(item.key)}">${this._esc(this._endpointLabel(item))}</option>`);
       });
       parts.push("</optgroup>");
     });
-    return parts.join("");
+    const html = parts.join("");
+    this._endpointOpts = { key, html };
+    return html;
+  },
+
+  _endpointOptions(selected) {
+    let html = this._endpointOptionsHtml();
+    if (!selected) return html;
+    const token = `value="${this._esc(selected)}"`;
+    const at = html.indexOf(token);
+    if (at === -1) return html;
+    return `${html.slice(0, at)}${token} selected${html.slice(at + token.length)}`;
   },
 
   _renderEndpointPicker() {
@@ -314,6 +517,7 @@ const FlowStudio = {
   },
 
   _addFromEndpoint(key) {
+    document.querySelector('.flow-structure-section[data-kind="steps"]')?.setAttribute("open", "");
     const picker = document.getElementById("flow-add-endpoint");
     if (picker) picker.value = "";
     if (!key) return;
@@ -427,7 +631,7 @@ const FlowStudio = {
     const colors = { ...(this.model.presentation.actorColors || {}) };
     colors[type] = hex;
     this.model.presentation.actorColors = colors;
-    this._afterStructure();
+    this._schedulePreview();
   },
 
   _renderActors() {
@@ -439,22 +643,31 @@ const FlowStudio = {
           <div class="flow-row">
             <input data-afield="name" value="${this._esc(actor.name)}" placeholder="Actor name" aria-label="Actor name">
             <select data-afield="type" aria-label="Actor type">${types}</select>
-            <code>${this._esc(actor.id)}</code>
-            <button type="button" data-aremove>Remove</button>
-          </div>
-          <div class="flow-row flow-actor-logo">
             ${actor.logo ? `<img class="flow-actor-thumb" src="${this._esc(actor.logo)}" alt="">` : ""}
-            <input data-afield="logo" value="${this._esc(actor.logo && !String(actor.logo).startsWith("data:") ? actor.logo : "")}" placeholder="Logo URL — replaces the name on the diagram" aria-label="Actor logo URL">
+            <input data-afield="logo" value="${this._esc(actor.logo && !String(actor.logo).startsWith("data:") ? actor.logo : "")}" placeholder="Logo URL" aria-label="Actor logo URL">
             <input type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" data-alogo hidden>
-            <button type="button" data-alogo-pick>Upload logo</button>
-            ${actor.logo ? `<button type="button" data-alogo-clear>Remove logo</button>` : ""}
+            <button type="button" data-alogo-pick>Logo</button>
+            ${actor.logo ? `<button type="button" data-alogo-clear>Clear</button>` : ""}
+            <button type="button" data-aremove>Remove</button>
           </div>
         </div>`;
       })
       .join("");
   },
 
+  _healStepActors(step) {
+    const ids = new Set(this.model.actors.map((actor) => actor.id));
+    const fallback = this.model.actors[0]?.id || "";
+    if (step.from && !ids.has(step.from)) step.from = fallback;
+    if (step.to && !ids.has(step.to)) step.to = fallback;
+    if (step.actor && !ids.has(step.actor)) step.actor = step.from || fallback;
+    if (!step.from) step.from = step.actor || fallback;
+    if (!step.to && step.type !== "condition") step.to = step.type === "process" ? step.from || fallback : fallback;
+    return step;
+  },
+
   _renderSteps() {
+    this._catalogMemo = new Map();
     const host = document.getElementById("flow-steps");
     const platform = this.model.presentation.platform;
     const drawnIds = new Set(
@@ -467,13 +680,15 @@ const FlowStudio = {
     host.innerHTML =
       note +
       this.model.steps
-        .map((step) => {
+        .map((raw, index) => {
+          const step = this._healStepActors(raw);
           const onPlatform = drawnIds.has(step.id);
           const typeOpts = FlowIR.STEP_TYPES.map((type) => `<option value="${type}"${type === step.type ? " selected" : ""}>${type}</option>`).join("");
           const methodValue = step.darwin?.method || step.method || "";
           const methodOpts = ["", ...FlowIR.METHODS].map((method) => `<option value="${method}"${method === methodValue ? " selected" : ""}>${method || "—"}</option>`).join("");
           const fromOpts = this._actorOptions(step.from || step.actor);
           const toOpts = this._actorOptions(step.to);
+          const local = step.type === "condition";
           const hop = step.type === "process" || step.type === "condition" ? "" : this._stepContractFields(step, platform, methodOpts);
           const off = onPlatform ? "" : `<p class="flow-filter-note">Not drawn on ${FlowIR.protocolLabel(platform)}.</p>`;
           const endpoint =
@@ -482,27 +697,120 @@ const FlowStudio = {
               : "";
           return `<div class="flow-step${onPlatform ? "" : " flow-step-off"}" data-step="${this._esc(step.id)}" data-protocol="${platform === "chopin" || FlowIR._chopinOnly(step) ? "soap" : platform === "both" ? "both" : "rest"}">
           <div class="flow-row">
+            <button type="button" class="flow-step-drag" data-sdrag draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
             <select data-sfield="type" aria-label="Step type">${typeOpts}</select>
-            <select data-sfield="from" aria-label="From">${fromOpts}</select>
-            <select data-sfield="to" aria-label="To">${toOpts}</select>
+            <select data-sfield="from" aria-label="${local ? "Actor" : "From"}">${fromOpts}</select>
+            ${local ? "" : `<select data-sfield="to" aria-label="To">${toOpts}</select>`}
+            <span class="flow-step-move">
+              <button type="button" data-smove="-1" title="Move up" aria-label="Move step up"${index === 0 ? " disabled" : ""}>↑</button>
+              <button type="button" data-smove="1" title="Move down" aria-label="Move step down"${index === this.model.steps.length - 1 ? " disabled" : ""}>↓</button>
+            </span>
             <button type="button" data-sremove>Remove</button>
           </div>
-          ${endpoint}
-          <div class="flow-row">
-            <input data-sfield="label" value="${this._esc(step.label || "")}" placeholder="Label">
-            <input data-sfield="status" value="${step.status || ""}" placeholder="${platform === "chopin" ? "Fault code" : "Status"}" inputmode="numeric">
-          </div>
+          ${this._stepMeaning(step, platform, endpoint, hop)}
           ${off}
-          ${hop}
-          ${this._fieldsEditor(step)}
         </div>`;
         })
         .join("");
   },
 
+  _stepMeaning(step, platform, endpoint, hop) {
+    if (step.type === "process") {
+      const marks = [
+        ["", "No mark"],
+        ["ok", "Done"],
+        ["current", "Current"],
+        ["pending", "Pending"],
+      ]
+        .map(([value, label]) => `<option value="${value}"${step.mark === value ? " selected" : ""}>${label}</option>`)
+        .join("");
+      return `<div class="flow-row">
+        <input data-sfield="label" value="${this._esc(step.label || "")}" placeholder="Authenticate request">
+        <input data-sfield="subtitle" value="${this._esc(step.subtitle || "")}" placeholder="OAuth 2.0">
+        <select data-sfield="mark" aria-label="Process mark">${marks}</select>
+      </div>
+      <p class="flow-filter-note">Phrase it as an action. Same actor does the work. Different actors means one asks the other — not an API.</p>`;
+    }
+    if (step.type === "condition") {
+      const kinds = FlowIR.CONDITION_KINDS.map(
+        (kind) => `<option value="${kind}"${(step.kind || "business") === kind ? " selected" : ""}>${FlowIR.conditionKindLabel(kind)}</option>`
+      ).join("");
+      return `<div class="flow-row">
+        <input data-sfield="label" value="${this._esc(step.label || "")}" placeholder="Card valid?">
+        <select data-sfield="kind" aria-label="Condition kind">${kinds}</select>
+      </div>
+      ${this._branchesEditor(step)}`;
+    }
+    return `${endpoint}
+      <div class="flow-row">
+        <input data-sfield="label" value="${this._esc(step.label || "")}" placeholder="Label">
+        <input data-sfield="status" value="${step.status || ""}" placeholder="${platform === "chopin" ? "Fault code" : "Status"}" inputmode="numeric">
+      </div>
+      ${hop}
+      ${this._fieldsEditor(step)}`;
+  },
+
+  _stepChoiceLabel(item) {
+    const name = item.label || item.path || item.operation || item.id;
+    const kind = item.type === "request" ? item.method || "request" : item.type === "response" ? item.status || "response" : item.type;
+    return `${name} · ${kind}`;
+  },
+
+  _seedConditionTargets(step) {
+    const after = this.model.steps.slice(this.model.steps.indexOf(step) + 1);
+    const pool = after.length ? after : this.model.steps.filter((item) => item.id !== step.id);
+    step.branches = step.branches || FlowIR.defaultBranches();
+    step.branches.forEach((branch, index) => {
+      if (!branch.target && pool[index]) branch.target = pool[index].id;
+    });
+  },
+
+  _nextConditionTarget(step) {
+    const used = new Set((step.branches || []).map((branch) => branch.target).filter(Boolean));
+    return this.model.steps.find((item) => item.id !== step.id && !used.has(item.id))?.id || "";
+  },
+
+  _branchesEditor(step) {
+    const branches = Array.isArray(step.branches) && step.branches.length ? step.branches : FlowIR.defaultBranches();
+    if (!step.branches?.length) step.branches = branches;
+    const rows = branches
+      .map((branch, index) => {
+        const targets = this.model.steps
+          .filter((item) => item.id !== step.id)
+          .map((item) => `<option value="${this._esc(item.id)}"${item.id === branch.target ? " selected" : ""}>${this._esc(this._stepChoiceLabel(item))}</option>`)
+          .join("");
+        return `<div class="flow-row flow-branch-row" data-bindex="${index}">
+          <input data-bfield="label" value="${this._esc(branch.label || "")}" placeholder="Yes">
+          <select data-bfield="target" aria-label="Goes to">
+            <option value="">Choose a step</option>
+            ${targets}
+          </select>
+          <button type="button" data-bremove>Remove</button>
+        </div>`;
+      })
+      .join("");
+    return `<div class="flow-branches">
+      <div class="flow-pane-head">
+        <strong>Outcomes</strong>
+        <button type="button" data-add-branch>Add outcome</button>
+      </div>
+      ${rows}
+      <p class="flow-filter-note">Each option goes to a step. Those steps sit under the diamond.</p>
+    </div>`;
+  },
+
+  _stepCatalog(step) {
+    const key = `${step.id}|${step.endpoint || ""}|${step.type}|${this.model.presentation.platform}`;
+    if (this._catalogMemo?.has(key)) return this._catalogMemo.get(key);
+    const catalog = FlowIR.catalogForStep(this.model, step);
+    this._catalogMemo = this._catalogMemo || new Map();
+    this._catalogMemo.set(key, catalog);
+    return catalog;
+  },
+
   _fieldsEditor(step) {
     if (step.type === "process" || step.type === "condition") return "";
-    const catalog = FlowIR.catalogForStep(this.model, step);
+    const catalog = this._stepCatalog(step);
     const rows = (step.fields || [])
       .map((field, index) => {
         const key = FlowIR.fieldKey(field);
@@ -532,8 +840,9 @@ const FlowStudio = {
     </div>`;
   },
 
-  _fieldOptions(catalog, field, custom) {
-    const key = FlowIR.fieldKey(field);
+  _catalogOptionsHtml(catalog) {
+    const key = catalog.map((item) => `${item.in}::${item.name}::${item.type || ""}::${item.required ? 1 : 0}`).join("|");
+    if (this._catalogOpts?.key === key) return this._catalogOpts.html;
     const groups = {};
     catalog.forEach((item) => {
       const group = item.in || "body";
@@ -547,12 +856,24 @@ const FlowStudio = {
       items.forEach((item) => {
         const itemKey = FlowIR.fieldKey(item);
         const label = `${item.name}${item.type ? ` · ${item.type}` : ""}${item.required ? " · required" : ""}`;
-        parts.push(`<option value="${this._esc(itemKey)}"${!custom && itemKey === key ? " selected" : ""}>${this._esc(label)}</option>`);
+        parts.push(`<option value="${this._esc(itemKey)}">${this._esc(label)}</option>`);
       });
       parts.push("</optgroup>");
     });
-    parts.push(`<option value="__custom__"${custom ? " selected" : ""}>Other…</option>`);
-    return parts.join("");
+    parts.push(`<option value="__custom__">Other…</option>`);
+    const html = parts.join("");
+    this._catalogOpts = { key, html };
+    return html;
+  },
+
+  _fieldOptions(catalog, field, custom) {
+    let html = this._catalogOptionsHtml(catalog);
+    if (custom) return html.replace('value="__custom__"', 'value="__custom__" selected');
+    if (!field?.name) return html;
+    const token = `value="${this._esc(FlowIR.fieldKey(field))}"`;
+    const at = html.indexOf(token);
+    if (at === -1) return html;
+    return `${html.slice(0, at)}${token} selected${html.slice(at + token.length)}`;
   },
 
   _stepContractFields(step, platform, methodOpts) {
@@ -585,8 +906,7 @@ const FlowStudio = {
     const hint = document.getElementById("flow-protocol-hint");
     if (hint) hint.textContent = FlowIR.protocolLabel(platform);
     const add = document.getElementById("flow-add-step");
-    if (add) add.textContent = platform === "chopin" ? "Add SOAP step" : platform === "both" ? "Add step" : "Add REST step";
-    this._renderEndpointPicker();
+    if (add) add.textContent = "Add step";
   },
 
   _actorOptions(selected) {
@@ -612,7 +932,16 @@ const FlowStudio = {
       if (logo) actor.logo = logo;
       else delete actor.logo;
     }
-    this._afterStructure();
+    if (field === "name") this._relabelActorOptions(actor);
+    if (event.type === "change" && this._isTextControl(event.target)) return;
+    this._schedulePreview();
+  },
+
+  _relabelActorOptions(actor) {
+    const safe = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(actor.id) : String(actor.id).replace(/\\/g, "\\\\");
+    document.querySelectorAll(`#flow-steps option[value="${safe}"]`).forEach((option) => {
+      option.textContent = actor.name;
+    });
   },
 
   _readActorLogo(actor, file) {
@@ -676,13 +1005,31 @@ const FlowStudio = {
       this._afterStructure();
       return;
     }
-    if (field === "type") step.type = value;
+    if (field === "type") {
+      step.type = value;
+      if (value === "process" || value === "condition") {
+        step.from = step.from || step.actor;
+        step.actor = step.from || step.actor;
+        if (value === "process" && !step.to) step.to = step.from;
+        if (value === "condition") {
+          step.kind = step.kind || "business";
+          if (!step.branches?.length) step.branches = FlowIR.defaultBranches();
+          this._seedConditionTargets(step);
+        }
+      }
+      this._renderSteps();
+      this._afterStructure();
+      return;
+    }
     if (field === "from") {
+      step.from = value;
       if (step.type === "process" || step.type === "condition") step.actor = value;
-      else step.from = value;
     }
     if (field === "to") step.to = value;
     if (field === "label") step.label = value;
+    if (field === "subtitle") step.subtitle = value;
+    if (field === "mark") step.mark = value || undefined;
+    if (field === "kind") step.kind = value;
     if (field === "method") {
       step.method = value || undefined;
       step.darwin = step.darwin || { supported: true };
@@ -719,14 +1066,26 @@ const FlowStudio = {
       step.chopin = step.chopin || { operation: step.operation || step.label, supported: true };
       step.chopin.supported = value;
     }
+    if (event.target.dataset.bfield) {
+      this._onBranchField(step, event.target);
+      if (event.type === "change" && this._isTextControl(event.target)) return;
+      this._schedulePreview();
+      return;
+    }
     if (event.target.dataset.ffield) {
       const rebuilt = this._onApiField(step, event.target);
-      if (rebuilt || field === "hasDarwin" || field === "hasChopin") this._renderSteps();
+      if (rebuilt) this._renderSteps();
+      else if (event.type === "change" && this._isTextControl(event.target)) return;
+      this._schedulePreview();
+      return;
+    }
+    if (field === "hasDarwin" || field === "hasChopin") {
+      this._renderSteps();
       this._afterStructure();
       return;
     }
-    if (field === "hasDarwin" || field === "hasChopin") this._renderSteps();
-    this._afterStructure();
+    if (event.type === "change" && this._isTextControl(event.target)) return;
+    this._schedulePreview();
   },
 
   _onApiField(step, input) {
@@ -745,7 +1104,7 @@ const FlowStudio = {
         delete step.fields[index].custom;
         return true;
       }
-      const hit = FlowIR.catalogForStep(this.model, step).find((item) => FlowIR.fieldKey(item) === value);
+      const hit = this._stepCatalog(step).find((item) => FlowIR.fieldKey(item) === value);
       if (hit) {
         step.fields[index] = { ...hit };
         return true;
@@ -766,12 +1125,38 @@ const FlowStudio = {
     return false;
   },
 
+  _onBranchField(step, input) {
+    const index = Number(input.closest("[data-bindex]")?.dataset.bindex);
+    if (Number.isNaN(index)) return;
+    step.branches = step.branches || FlowIR.defaultBranches();
+    if (!step.branches[index]) step.branches[index] = { id: FlowIR.uid("b"), label: "", target: "", when: "" };
+    const key = input.dataset.bfield;
+    const value = input.value;
+    if (key === "label") step.branches[index].label = value;
+    if (key === "target") step.branches[index].target = value;
+  },
+
   _onStepClick(event) {
     const card = event.target.closest("[data-step]");
     const step = this.model.steps.find((item) => item.id === card?.dataset.step);
+    if (event.target.closest("[data-add-branch]") && step) {
+      step.branches = step.branches || FlowIR.defaultBranches();
+      step.branches.push({ id: FlowIR.uid("b"), label: `Path ${step.branches.length + 1}`, target: this._nextConditionTarget(step), when: "" });
+      this._renderSteps();
+      this._afterStructure();
+      return;
+    }
+    if (event.target.closest("[data-bremove]") && step) {
+      const index = Number(event.target.closest("[data-bindex]")?.dataset.bindex);
+      step.branches = (step.branches || []).filter((_, i) => i !== index);
+      if (!step.branches.length) step.branches = FlowIR.defaultBranches();
+      this._renderSteps();
+      this._afterStructure();
+      return;
+    }
     if (event.target.closest("[data-add-field]") && step) {
       step.fields = step.fields || [];
-      const unused = FlowIR.catalogForStep(this.model, step).find((item) => !step.fields.some((field) => FlowIR.fieldKey(field) === FlowIR.fieldKey(item)));
+      const unused = this._stepCatalog(step).find((item) => !step.fields.some((field) => FlowIR.fieldKey(field) === FlowIR.fieldKey(item)));
       step.fields.push(
         unused
           ? { ...unused }
@@ -788,11 +1173,96 @@ const FlowStudio = {
       this._afterStructure();
       return;
     }
+    const move = event.target.closest("[data-smove]");
+    if (move && step) {
+      this._moveStep(step.id, Number(move.dataset.smove));
+      return;
+    }
     if (!event.target.closest("[data-sremove]")) return;
     const id = card?.dataset.step;
     this.model.steps = this.model.steps.filter((item) => item.id !== id);
     this._renderSteps();
     this._afterStructure();
+  },
+
+  _moveStep(id, delta) {
+    const index = this.model.steps.findIndex((step) => step.id === id);
+    const next = index + delta;
+    if (index < 0 || next < 0 || next >= this.model.steps.length) return;
+    const [step] = this.model.steps.splice(index, 1);
+    this.model.steps.splice(next, 0, step);
+    this._alignImplOrder();
+    this._renderSteps();
+    this._afterStructure();
+    document.querySelector(`#flow-steps [data-step="${this._esc(id)}"]`)?.scrollIntoView({ block: "nearest" });
+  },
+
+  _moveStepTo(fromId, toId, before) {
+    if (!fromId || fromId === toId) return;
+    const from = this.model.steps.findIndex((step) => step.id === fromId);
+    if (from < 0) return;
+    const [step] = this.model.steps.splice(from, 1);
+    let to = this.model.steps.findIndex((item) => item.id === toId);
+    if (to < 0) {
+      this.model.steps.splice(from, 0, step);
+      return;
+    }
+    this.model.steps.splice(before ? to : to + 1, 0, step);
+    this._alignImplOrder();
+    this._renderSteps();
+    this._afterStructure();
+  },
+
+  _alignImplOrder() {
+    const order = this.model.steps.map((step) => step.id);
+    ["darwin", "chopin"].forEach((key) => {
+      const list = this.model.implementations?.[key]?.steps;
+      if (!Array.isArray(list)) return;
+      const keep = new Set(list);
+      this.model.implementations[key].steps = order.filter((id) => keep.has(id));
+    });
+  },
+
+  _onStepDragStart(event) {
+    const handle = event.target.closest("[data-sdrag]");
+    const card = event.target.closest("[data-step]");
+    if (!handle || !card) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData("text/plain", card.dataset.step);
+    event.dataTransfer.effectAllowed = "move";
+    card.classList.add("flow-step-dragging");
+    this._dragStep = card.dataset.step;
+  },
+
+  _onStepDragOver(event) {
+    const card = event.target.closest("[data-step]");
+    if (!this._dragStep || !card) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const before = event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2;
+    document.querySelectorAll("#flow-steps .flow-step-drop-before, #flow-steps .flow-step-drop-after").forEach((el) => {
+      el.classList.remove("flow-step-drop-before", "flow-step-drop-after");
+    });
+    card.classList.add(before ? "flow-step-drop-before" : "flow-step-drop-after");
+  },
+
+  _onStepDrop(event) {
+    const card = event.target.closest("[data-step]");
+    const fromId = this._dragStep || event.dataTransfer.getData("text/plain");
+    if (!card || !fromId) return;
+    event.preventDefault();
+    const before = event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2;
+    this._moveStepTo(fromId, card.dataset.step, before);
+    this._onStepDragEnd();
+  },
+
+  _onStepDragEnd() {
+    this._dragStep = "";
+    document.querySelectorAll("#flow-steps .flow-step-dragging, #flow-steps .flow-step-drop-before, #flow-steps .flow-step-drop-after").forEach((el) => {
+      el.classList.remove("flow-step-dragging", "flow-step-drop-before", "flow-step-drop-after");
+    });
   },
 
   _setDarwin(step, on) {
@@ -818,15 +1288,22 @@ const FlowStudio = {
   },
 
   _syncImplementations() {
-    const ids = new Set(this.model.steps.map((step) => step.id));
+    if (!this.model) return;
+    this.model.implementations = this.model.implementations || {};
+    this.model.steps = this.model.steps || [];
+    const order = this.model.steps.map((step) => step.id);
+    const ids = new Set(order);
     ["darwin", "chopin"].forEach((key) => {
       const impl = this.model.implementations[key] || { protocol: key === "chopin" ? "SOAP" : "REST" };
-      const existing = Array.isArray(impl.steps) ? impl.steps.filter((id) => ids.has(id)) : [];
+      const existing = new Set(Array.isArray(impl.steps) ? impl.steps.filter((id) => ids.has(id)) : []);
       this.model.steps.forEach((step) => {
-        if (existing.includes(step.id)) return;
-        if (!step.platforms || step.platforms.includes(key)) existing.push(step.id);
+        if (existing.has(step.id)) return;
+        if (!step.platforms || step.platforms.includes(key)) existing.add(step.id);
       });
-      this.model.implementations[key] = { protocol: impl.protocol || (key === "chopin" ? "SOAP" : "REST"), steps: existing };
+      this.model.implementations[key] = {
+        protocol: impl.protocol || (key === "chopin" ? "SOAP" : "REST"),
+        steps: order.filter((id) => existing.has(id)),
+      };
     });
   },
 
@@ -918,6 +1395,7 @@ const FlowStudio = {
       .join("");
     box.hidden = false;
     document.getElementById("flow-openapi-box").open = true;
+    this._toggleImport(true);
     const sources = listed.sources?.length ? listed.sources : [...new Set(listed.operations.map((item) => item.source).filter(Boolean))];
     const files = document.getElementById("flow-openapi-files");
     if (files) files.textContent = sources.length ? `${sources.length} file${sources.length === 1 ? "" : "s"}: ${sources.join(" · ")}` : "";
@@ -985,6 +1463,7 @@ const FlowStudio = {
     this.model = parsed.model;
     this.customerUndo = null;
     this._renderAll();
+    this._toggleImport(false);
   },
 
   _readWsdl() {
@@ -1074,6 +1553,7 @@ const FlowStudio = {
       .join("");
     box.hidden = false;
     document.getElementById("flow-wsdl-box").open = true;
+    this._toggleImport(true);
     const sources = listed.sources?.length ? listed.sources : [...new Set(listed.operations.map((item) => item.source).filter(Boolean))];
     const files = document.getElementById("flow-wsdl-files");
     if (files) files.textContent = sources.length ? `${sources.length} file${sources.length === 1 ? "" : "s"}: ${sources.join(" · ")}` : "";
@@ -1143,6 +1623,113 @@ const FlowStudio = {
     this.model = parsed.model;
     this.customerUndo = null;
     this._renderAll();
+    this._toggleImport(false);
+  },
+
+  _onImagePaste(event) {
+    if (document.getElementById("flow-modal")?.hidden) return;
+    if (event.target.closest("textarea, input") && event.clipboardData?.getData("text")) return;
+    const file = this._clipboardImage(event.clipboardData);
+    if (!file) return;
+    event.preventDefault();
+    this._toggleImport(true);
+    document.getElementById("flow-image-box")?.setAttribute("open", "");
+    this._acceptImage(file);
+  },
+
+  _clipboardImage(data) {
+    if (!data) return null;
+    const files = [...(data.files || [])].filter((file) => file.type.startsWith("image/") || /\.svg$/i.test(file.name || ""));
+    if (files[0]) return files[0];
+    const item = [...(data.items || [])].find((entry) => String(entry.type || "").startsWith("image/"));
+    return item?.getAsFile?.() || null;
+  },
+
+  _readImageFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) this._acceptImage(file);
+  },
+
+  _acceptImage(file) {
+    this._imageFile = file;
+    const preview = document.getElementById("flow-image-preview");
+    const hint = document.getElementById("flow-image-hint");
+    const clear = document.getElementById("flow-image-clear");
+    if (clear) clear.hidden = false;
+    document.getElementById("flow-image-box")?.setAttribute("open", "");
+    this._toggleImport(true);
+    this._setImageStatus(file.name || "Image ready");
+    if (file.type.startsWith("image/") && file.type !== "image/svg+xml") {
+      const url = URL.createObjectURL(file);
+      preview.hidden = false;
+      preview.onload = () => URL.revokeObjectURL(url);
+      preview.src = url;
+      if (hint) hint.hidden = true;
+    } else {
+      preview.hidden = true;
+      preview.removeAttribute("src");
+      if (hint) {
+        hint.hidden = false;
+        hint.textContent = file.name || "SVG ready";
+      }
+    }
+  },
+
+  _clearImage(silent) {
+    this._imageFile = null;
+    const preview = document.getElementById("flow-image-preview");
+    const hint = document.getElementById("flow-image-hint");
+    const clear = document.getElementById("flow-image-clear");
+    if (preview) {
+      preview.hidden = true;
+      preview.removeAttribute("src");
+    }
+    if (hint) {
+      hint.hidden = false;
+      hint.textContent = "Drop a PNG, JPEG, or SVG of an existing flow, or paste from the clipboard.";
+    }
+    if (clear) clear.hidden = true;
+    if (!silent) this._setImageStatus("");
+  },
+
+  _setImageStatus(text) {
+    const el = document.getElementById("flow-image-status");
+    if (el) el.textContent = text || "";
+  },
+
+  _compileImage() {
+    if (!this._imageFile) {
+      this._errors(["Drop or choose a flow image first"]);
+      return;
+    }
+    const button = document.getElementById("flow-image-compile");
+    if (button) button.disabled = true;
+    this._setImageStatus("Creating the flow…");
+    this._errors([]);
+    FlowImage.fromFile(this._imageFile, {
+      platform: this.model?.presentation?.platform || "darwin",
+      onStatus: (text) => this._setImageStatus(text),
+    })
+      .then((parsed) => {
+        if (!parsed?.ok) {
+          this._errors(parsed?.errors || ["Could not create a flow from that image"]);
+          this._setImageStatus("");
+          return;
+        }
+        this.model = parsed.model;
+        this.customerUndo = null;
+        this._renderAll();
+        this._toggleImport(false);
+        this._setImageStatus(parsed.note || "Flow created from the image.");
+      })
+      .catch((err) => {
+        this._errors([err.message || "Could not create a flow from that image"]);
+        this._setImageStatus("");
+      })
+      .finally(() => {
+        if (button) button.disabled = false;
+      });
   },
 
   _readFile(event, targetId, then) {

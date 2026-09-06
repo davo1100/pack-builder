@@ -1187,7 +1187,7 @@ h2.section:first-child {
 .flow-sheet {
   background: #fff;
   border-radius: 18px;
-  width: min(1280px, 100%);
+  width: min(1560px, 100%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1258,6 +1258,7 @@ h2.section:first-child {
 .flow-toolbar button,
 .flow-pane-head button,
 .flow-import-actions button,
+.flow-import-drawer-head button,
 .flow-row button {
   border: 1px solid var(--border);
   background: #fff;
@@ -1270,11 +1271,108 @@ h2.section:first-child {
   cursor: pointer;
 }
 
+.flow-import-toggle {
+  margin-left: auto;
+}
+
+.flow-import-drawer {
+  border-bottom: 1px solid var(--border);
+  background: var(--cream);
+  max-height: min(42vh, 420px);
+  overflow: auto;
+}
+
+.flow-import-drawer[hidden] {
+  display: none;
+}
+
+.flow-import-drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 0;
+}
+
+.flow-import-drawer-head span {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--taupe);
+  margin-top: 2px;
+}
+
+.flow-import-drawer-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 10px 16px 14px;
+}
+
+.flow-image-drop {
+  min-height: 88px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+}
+
+.flow-image-drop:focus,
+.flow-image-drop.is-over {
+  outline: 2px solid var(--accent, #7e6de2);
+  outline-offset: 1px;
+}
+
+.flow-image-drop p {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--taupe);
+}
+
+.flow-image-drop img {
+  max-width: 100%;
+  max-height: 96px;
+  object-fit: contain;
+}
+
+#flow-image-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flow-import-drawer .flow-import {
+  margin-top: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.flow-import-drawer .flow-import textarea {
+  min-height: 88px;
+}
+
+@media (max-width: 1100px) {
+  .flow-import-drawer-body {
+    grid-template-columns: 1fr;
+  }
+}
+
 .flow-body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.1fr) minmax(280px, 1.2fr);
+  grid-template-columns: minmax(380px, 1fr) minmax(420px, 1.25fr);
   gap: 0;
 }
 
@@ -1283,10 +1381,58 @@ h2.section:first-child {
   padding: 12px 14px;
   border-right: 1px solid var(--border);
   overflow: auto;
+  contain: layout style;
 }
 
 .flow-pane:last-child {
   border-right: 0;
+}
+
+.flow-structure-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.flow-structure-section > summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+}
+
+.flow-structure-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.flow-structure-section > summary .flow-pane-head::before {
+  content: "";
+  width: 0.42em;
+  height: 0.42em;
+  margin-right: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  flex: 0 0 auto;
+}
+
+.flow-structure-section:not([open]) > summary .flow-pane-head::before {
+  transform: rotate(-45deg);
+}
+
+.flow-structure-section:not([open]) > summary .flow-pane-head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.flow-preview-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-preview-pane h3 {
+  flex: 0 0 auto;
 }
 
 .flow-pane h3 {
@@ -1433,10 +1579,11 @@ h2.section:first-child {
 
 .flow-structure-section[data-kind="steps"] {
   border-top: 3px solid var(--olive);
-  margin-top: 18px;
+  margin-top: 10px;
 }
 
 .flow-structure-section .flow-pane-head {
+  flex: 0 0 auto;
   margin: 0 0 10px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
@@ -1476,6 +1623,45 @@ h2.section:first-child {
   border-radius: 8px;
   padding: 8px;
   background: #fff;
+}
+
+.flow-step-drag {
+  flex: 0 0 auto;
+  min-width: 28px;
+  letter-spacing: -2px;
+  cursor: grab;
+  color: var(--taupe);
+}
+
+.flow-step-drag:active {
+  cursor: grabbing;
+}
+
+.flow-step-move {
+  display: flex;
+  gap: 4px;
+}
+
+.flow-step-move button {
+  flex: 0 0 auto;
+  min-width: 28px;
+}
+
+.flow-step-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.flow-step-dragging {
+  opacity: 0.55;
+}
+
+.flow-step-drop-before {
+  box-shadow: inset 0 3px 0 #7E6DE2;
+}
+
+.flow-step-drop-after {
+  box-shadow: inset 0 -3px 0 #7E6DE2;
 }
 
 .flow-step-off {
@@ -1538,15 +1724,19 @@ h2.section:first-child {
 }
 
 .flow-actor {
-  padding: 8px;
+  padding: 6px 8px;
   margin-bottom: 0;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
-.flow-actor-logo input[data-afield="logo"] {
-  flex: 1 1 160px;
+.flow-actor .flow-row {
+  margin-bottom: 0;
+}
+
+.flow-actor input[data-afield="logo"] {
+  flex: 0 1 110px;
 }
 
 .flow-actor-thumb {
@@ -1619,10 +1809,19 @@ h2.section:first-child {
   white-space: nowrap;
 }
 
-.flow-fields {
+.flow-fields,
+.flow-branches {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed var(--border);
+}
+
+.flow-branch-row input[data-bfield="label"] {
+  flex: 0 1 90px;
+}
+
+.flow-branch-row select[data-bfield="target"] {
+  flex: 1 1 140px;
 }
 
 .flow-field-row select[data-ffield="name"] {
@@ -1654,12 +1853,14 @@ h2.section:first-child {
 }
 
 .flow-preview {
-  min-height: 280px;
+  flex: 1;
+  min-height: 0;
   background: var(--cream);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
   overflow: auto;
+  contain: layout style;
 }
 
 .flow-preview svg {

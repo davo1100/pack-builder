@@ -2,6 +2,14 @@ const FlowIR = {
   METHODS: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   ACTOR_TYPES: ["client", "internal", "external", "platform", "process"],
   STEP_TYPES: ["request", "response", "process", "condition"],
+  CONDITION_KINDS: ["business", "http", "capability", "routing"],
+  PROCESS_MARKS: ["", "ok", "current", "pending"],
+  CONDITION_KIND_LABELS: {
+    business: "Business",
+    http: "HTTP",
+    capability: "Capability",
+    routing: "Routing",
+  },
   AUDIENCES: ["developer", "ops", "process"],
   VIEWERS: [
     { key: "process", label: "Business process" },
@@ -196,8 +204,39 @@ const FlowIR = {
       out.fields = step.fields.map((field) => this._normalizeField(field));
     }
     if (step?.endpoint) out.endpoint = String(step.endpoint);
-    if (!out.label) out.label = out.path || out.operation || `Step ${index + 1}`;
+    if (type === "process") {
+      if (step?.subtitle) out.subtitle = String(step.subtitle);
+      if (this.PROCESS_MARKS.includes(step?.mark)) out.mark = step.mark;
+    }
+    if (type === "condition") {
+      out.kind = this.CONDITION_KINDS.includes(step?.kind) ? step.kind : "business";
+      const raw = Array.isArray(step?.branches) ? step.branches : Array.isArray(step?.outcomes) ? step.outcomes : this.defaultBranches();
+      out.branches = raw.map((branch, i) => this._normalizeBranch(branch, i));
+      if (!out.branches.length) out.branches = this.defaultBranches();
+    }
+    if (!out.label) out.label = out.path || out.operation || (type === "condition" ? "Decide?" : `Step ${index + 1}`);
     return out;
+  },
+
+  defaultBranches() {
+    return [
+      { id: this.uid("b"), label: "Yes", when: "true", target: "" },
+      { id: this.uid("b"), label: "No", when: "false", target: "" },
+    ];
+  },
+
+  _normalizeBranch(branch, index) {
+    const fallback = index === 0 ? "Yes" : index === 1 ? "No" : `Path ${index + 1}`;
+    return {
+      id: String(branch?.id || this.uid("b")),
+      label: String(branch?.label || branch?.condition || fallback).trim() || fallback,
+      target: branch?.target ? String(branch.target) : "",
+      when: branch?.when != null && branch.when !== "" ? String(branch.when) : "",
+    };
+  },
+
+  conditionKindLabel(kind) {
+    return this.CONDITION_KIND_LABELS[kind] || this.CONDITION_KIND_LABELS.business;
   },
 
   _normalizeEndpoint(item) {
@@ -344,15 +383,20 @@ const FlowIR = {
     const next = this.normalize(model);
     const key = this.audienceOf(audience);
     next.presentation.audience = key;
-    next.presentation.showFields = key === "developer";
+    next.presentation.showFields = key === "developer" && next.presentation.showFields !== false;
     if (key === "process") next.presentation.layout = "sequence";
     return next;
   },
 
-  present(model) {
-    const checked = this.validate(model);
-    if (!checked.ok) return { ok: false, errors: checked.errors, view: null };
-    const src = checked.model;
+  present(model, options) {
+    let src = model;
+    if (!options?.trusted) {
+      const checked = this.validate(model);
+      if (!checked.ok) return { ok: false, errors: checked.errors, view: null };
+      src = checked.model;
+    } else if (!src || typeof src !== "object") {
+      return { ok: false, errors: ["No flow to draw"], view: null };
+    }
     const pres = { ...src.presentation, audience: this.audienceOf(src.presentation.audience) };
     const hidden = new Set(pres.hidden);
     if (pres.audience === "process") {
@@ -364,10 +408,24 @@ const FlowIR = {
       });
     }
     const platform = pres.platform;
-    const steps = src.steps
-      .filter((step) => !hidden.has(step.id) && !hidden.has(step.from) && !hidden.has(step.to) && this.stepOnPlatform(step, platform, src.implementations))
-      .map((step) => this._presentStep(step, pres, src));
     const actors = src.actors.filter((actor) => !hidden.has(actor.id));
+    const visibleIds = new Set(actors.map((actor) => actor.id));
+    const steps = (src.steps || [])
+      .filter((step) => {
+        if (hidden.has(step.id) || !this.stepOnPlatform(step, platform, src.implementations)) return false;
+        if (step.type === "condition") {
+          const actor = step.actor || step.from;
+          return !actor || visibleIds.has(actor);
+        }
+        if (step.type === "process" && !this.isProcessHop(step)) {
+          const actor = step.actor || step.from;
+          return !actor || visibleIds.has(actor);
+        }
+        const fromOk = !step.from || visibleIds.has(step.from);
+        const toOk = !step.to || visibleIds.has(step.to);
+        return fromOk || toOk;
+      })
+      .map((step) => this._presentStep(step, pres, src, visibleIds));
     return {
       ok: true,
       errors: [],
@@ -382,11 +440,16 @@ const FlowIR = {
     };
   },
 
+  isProcessHop(step) {
+    return step?.type === "process" && Boolean(step.from && step.to && step.from !== step.to);
+  },
+
   stepOnPlatform(step, platform, implementations) {
     if (!step) return false;
     if (platform === "both") return true;
     if (Array.isArray(step.platforms) && step.platforms.length) return step.platforms.includes(platform);
-    if (implementations?.[platform]?.steps) return implementations[platform].steps.includes(step.id);
+    const listed = implementations?.[platform]?.steps;
+    if (Array.isArray(listed) && listed.length) return listed.includes(step.id);
     return true;
   },
 
@@ -404,8 +467,13 @@ const FlowIR = {
     return Boolean(step?.chopin || step?.platforms?.includes("chopin") || step?.operation);
   },
 
-  _presentStep(step, pres, src) {
+  _presentStep(step, pres, src, visibleIds) {
     const next = { ...step };
+    const standIn = visibleIds instanceof Set && visibleIds.size ? [...visibleIds][0] : "";
+    const pick = (id) => (id && visibleIds?.has?.(id) ? id : standIn || id);
+    if (next.actor) next.actor = pick(next.actor);
+    if (next.from) next.from = pick(next.from);
+    if (next.to) next.to = pick(next.to);
     const platform = pres.platform;
     if (platform === "darwin") {
       next.protocol = "REST";
@@ -435,8 +503,27 @@ const FlowIR = {
       next.caption = this._developerCaption(next, platform);
       next.fieldChips = pres.audience === "developer" && pres.showFields !== false ? this.fieldChips(step.fields, "developer") : [];
     }
+    if (step.type === "process") {
+      next.subtitle = pres.audience === "process" ? "" : step.subtitle || "";
+      next.mark = step.mark || "";
+    }
+    if (step.type === "condition") {
+      next.kind = this.CONDITION_KINDS.includes(step.kind) ? step.kind : "business";
+      next.kindLabel = pres.audience === "process" ? "" : this.conditionKindLabel(next.kind);
+      next.branches = this._presentBranches(step, src);
+    }
     if (next.unsupported && pres.audience !== "process") next.caption = `${next.caption || "Step"} — Unsupported`;
     return next;
+  },
+
+  _presentBranches(step, src) {
+    const raw = Array.isArray(step.branches) ? step.branches : this.defaultBranches();
+    return raw.map((branch, index) => {
+      const next = this._normalizeBranch(branch, index);
+      const target = src.steps.find((item) => item.id === next.target);
+      next.targetLabel = target ? this._plainAction(target) || target.label : "";
+      return next;
+    });
   },
 
   fieldChips(fields, audience) {
@@ -486,7 +573,8 @@ const FlowIR = {
     const from = actors.find((actor) => actor.id === step.from)?.name || actors.find((actor) => actor.id === step.actor)?.name || "Requester";
     const to = actors.find((actor) => actor.id === step.to)?.name || "Receiver";
     const action = this._plainAction(step);
-    if (step.type === "process" || step.type === "condition") return `${from}: ${action}`;
+    if (step.type === "process") return this.isProcessHop(step) ? `${from} → ${to}: ${action}` : action;
+    if (step.type === "condition") return /[?？]$/.test(action) ? action : `${action}?`;
     return `${from} → ${to}: ${action}`;
   },
 
@@ -498,7 +586,8 @@ const FlowIR = {
     label = label.replace(/\s{2,}/g, " ").replace(/^[-:.\s]+|[-:.\s]+$/g, "").trim();
     if (label) return label;
     if (step.type === "response") return Number(step.status) >= 400 ? "reports a problem" : "confirms completion";
-    if (step.type === "process" || step.type === "condition") return "handles the work";
+    if (step.type === "condition") return "Decide";
+    if (step.type === "process") return "handles the work";
     return step.operation ? String(step.operation).replace(/([a-z])([A-Z])/g, "$1 $2") : "continues the process";
   },
 

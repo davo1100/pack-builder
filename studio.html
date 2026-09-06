@@ -417,14 +417,33 @@
         </label>
         <span id="flow-protocol-hint" class="flow-protocol-hint">Darwin REST</span>
         <label class="flow-show-fields"><input id="flow-show-fields" type="checkbox" checked> Show API fields</label>
+        <button type="button" id="flow-import-toggle" class="flow-import-toggle" aria-expanded="false" aria-controls="flow-import-drawer">Import</button>
       </div>
-      <div class="flow-body">
-        <section class="flow-pane">
-          <h3>Source</h3>
-          <label class="flow-block-label" for="flow-source">JSON IR</label>
-          <textarea id="flow-source" spellcheck="false"></textarea>
+      <div id="flow-import-drawer" class="flow-import-drawer" hidden>
+        <div class="flow-import-drawer-head">
+          <div>
+            <strong>Import</strong>
+            <span>Load a picture or a spec, then close this so Steps and Preview sit side by side.</span>
+          </div>
+          <button type="button" id="flow-import-close">Close</button>
+        </div>
+        <div class="flow-import-drawer-body">
+          <details class="flow-import" id="flow-image-box" open>
+            <summary>Flow image</summary>
+            <div id="flow-image-drop" class="flow-image-drop" tabindex="0">
+              <img id="flow-image-preview" alt="" hidden>
+              <p id="flow-image-hint">Drop a PNG, JPEG, or SVG of an existing flow, or paste from the clipboard.</p>
+            </div>
+            <div class="flow-import-actions">
+              <input id="flow-image-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.svg,.html" hidden>
+              <button type="button" id="flow-image-choose">Choose image</button>
+              <button type="button" id="flow-image-compile">Create flow</button>
+              <button type="button" id="flow-image-clear" hidden>Clear</button>
+            </div>
+            <p id="flow-image-status" class="flow-filter-note"></p>
+          </details>
           <details class="flow-import" id="flow-openapi-box">
-            <summary>Import OpenAPI</summary>
+            <summary>OpenAPI</summary>
             <textarea id="flow-openapi" spellcheck="false" placeholder="Paste OpenAPI 3 or Swagger 2 JSON or YAML, or upload one or more files"></textarea>
             <div class="flow-import-actions">
               <input id="flow-openapi-file" type="file" multiple accept=".json,.yaml,.yml,application/json,text/yaml">
@@ -444,7 +463,7 @@
             </div>
           </details>
           <details class="flow-import" id="flow-wsdl-box">
-            <summary>Import Chopin WSDL</summary>
+            <summary>Chopin WSDL</summary>
             <textarea id="flow-wsdl" spellcheck="false" placeholder="Paste a Chopin SOAP WSDL, or upload one or more .wsdl files"></textarea>
             <div class="flow-import-actions">
               <input id="flow-wsdl-file" type="file" multiple accept=".wsdl,.xml,text/xml,application/xml">
@@ -463,31 +482,40 @@
               <div id="flow-wsdl-list" class="flow-openapi-list"></div>
             </div>
           </details>
-        </section>
-        <section class="flow-pane">
-          <h3>Structure</h3>
-          <div class="flow-structure-section" data-kind="actors">
-            <div class="flow-pane-head">
-              <strong>Actors</strong>
-              <button type="button" id="flow-add-actor">Add actor</button>
-            </div>
+          <details class="flow-import" id="flow-source-box">
+            <summary>JSON IR</summary>
+            <label class="flow-block-label" for="flow-source">Raw source</label>
+            <textarea id="flow-source" spellcheck="false"></textarea>
+          </details>
+        </div>
+      </div>
+      <div class="flow-body">
+        <section class="flow-pane flow-structure-pane">
+          <details class="flow-structure-section" data-kind="actors" open>
+            <summary>
+              <div class="flow-pane-head">
+                <strong>Actors</strong>
+                <button type="button" id="flow-add-actor">Add actor</button>
+              </div>
+            </summary>
             <div id="flow-actor-colors" class="flow-actor-colors"></div>
             <div id="flow-actors" class="flow-list"></div>
-          </div>
-          <div class="flow-structure-section" data-kind="steps">
-            <div class="flow-pane-head">
-              <strong>Steps</strong>
-              <select id="flow-add-endpoint" hidden aria-label="Add endpoint from spec">
-                <option value="">Add endpoint…</option>
-              </select>
-              <button type="button" id="flow-add-step">Add step</button>
-            </div>
+          </details>
+          <details class="flow-structure-section" data-kind="steps" open>
+            <summary>
+              <div class="flow-pane-head">
+                <strong>Steps</strong>
+                <select id="flow-add-endpoint" hidden aria-label="Add endpoint from spec">
+                  <option value="">Add endpoint…</option>
+                </select>
+                <button type="button" id="flow-add-step">Add step</button>
+              </div>
+            </summary>
             <div id="flow-steps" class="flow-list"></div>
-          </div>
+          </details>
         </section>
         <section class="flow-pane flow-preview-pane">
           <h3>Preview</h3>
-          <p class="flow-filter-note">Published packs keep this developer flow as the source, then offer Business process, Ops, and Developer tabs.</p>
           <div id="flow-preview" class="flow-preview"></div>
         </section>
       </div>
@@ -500,6 +528,7 @@
   <script src="js/diagram.js"></script>
   <script src="js/flow-ir.js"></script>
   <script src="js/flow-parse.js"></script>
+  <script src="js/flow-image.js?v=seq-import6"></script>
   <script src="js/flow-render.js"></script>
   <script src="js/flow-studio.js"></script>
   <script src="js/studio.js"></script>
