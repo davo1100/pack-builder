@@ -804,6 +804,11 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
     openFlowStudio(true);
     return;
   }
+  if (event.target.closest("#btn-convert-diagram-flow") || event.target.closest("#btn-convert-image-flow")) {
+    closeInsertMenu();
+    convertSelectedDiagramToFlow();
+    return;
+  }
   const insert = event.target.closest("button[data-insert]");
   if (insert) {
     closeInsertMenu();
@@ -960,14 +965,19 @@ PackEditor.bind(els.editor, {
     if (columnTools) columnTools.hidden = !columns;
     if (columns) syncColumnTools(columns);
     renderSectionOutline();
+    syncFlowConvertButtons();
     if (isDiagram) {
-      els.editorHint.textContent = "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
+      els.editorHint.textContent = PackEditor.flowImageFromSelection()
+        ? "Diagram selected. Convert it to an API flow here, or click Edit diagram for the drawing tools."
+        : "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
     } else if (isFlow) {
       els.editorHint.textContent = "API flow selected. Click Edit flow, or double-click it to reopen Flow Studio.";
     } else if (code) {
       els.editorHint.textContent = "Code selected. Change the title here. The code itself stays plain text.";
     } else if (image) {
-      els.editorHint.textContent = "Image selected. Change size or position here, drag the purple corner, or use Block arrows to move it.";
+      els.editorHint.textContent = PackEditor.flowImageFromSelection()?.el?.hasAttribute("data-flow-candidate")
+        ? "This looks like a sequence diagram. Convert it to an API flow here, or change size and position."
+        : "Image selected. Change size or position here, drag the purple corner, or use Block arrows to move it.";
     } else if (columns && columns.hasGrid) {
       els.editorHint.textContent = "Column layout selected. Change 1–4 columns here, click a column to add content, or use Block arrows to reorder a column.";
     } else if (isTable) {
@@ -1010,6 +1020,63 @@ function openDiagramEditor(editExisting) {
     setStatus("Diagram saved", "ok");
     schedulePreview(true);
   });
+}
+
+function syncFlowConvertButtons() {
+  const source = PackEditor.flowImageFromSelection();
+  const host = source?.el;
+  const imageBtn = document.getElementById("btn-convert-image-flow");
+  const diagramBtn = document.getElementById("btn-convert-diagram-flow");
+  if (imageBtn) imageBtn.hidden = !(host?.matches?.(".pack-image") && host.hasAttribute("data-flow-candidate"));
+  if (diagramBtn) diagramBtn.hidden = !host?.matches?.(".diagram-container");
+}
+
+function convertSelectedDiagramToFlow() {
+  const source = PackEditor.flowImageFromSelection();
+  if (!source?.el && !source?.img && !source?.src) {
+    setStatus("Click a diagram or image first", "error");
+    return;
+  }
+  const buttons = [document.getElementById("btn-convert-image-flow"), document.getElementById("btn-convert-diagram-flow")];
+  buttons.forEach((button) => {
+    if (button) button.disabled = true;
+  });
+  PackEditor.pendingFlowReplace = source.el;
+  setStatus("Reading the diagram…", "ok");
+  FlowImage.read(source.el || source.img || source.src, {
+    platform: "darwin",
+    onStatus: (text) => setStatus(text, "ok"),
+  })
+    .then((parsed) => {
+      if (!parsed?.ok) {
+        PackEditor.pendingFlowReplace = null;
+        setStatus(parsed?.errors?.[0] || "Could not turn that diagram into a flow", "error");
+        return;
+      }
+      const apply = document.getElementById("flow-apply");
+      if (apply) apply.textContent = "Replace image";
+      const cancel = document.getElementById("flow-cancel");
+      const forget = () => {
+        PackEditor.pendingFlowReplace = null;
+      };
+      cancel?.addEventListener("click", forget, { once: true });
+      FlowStudio.open(parsed.model, (html) => {
+        cancel?.removeEventListener("click", forget);
+        PackEditor.replaceFlowSource(html);
+        setStatus("API flow added in place of the diagram", "ok");
+        schedulePreview(true);
+      });
+      setStatus(parsed.note || "Check the flow, then replace the image.", "ok");
+    })
+    .catch((err) => {
+      PackEditor.pendingFlowReplace = null;
+      setStatus(err.message || "Could not turn that diagram into a flow", "error");
+    })
+    .finally(() => {
+      buttons.forEach((button) => {
+        if (button) button.disabled = false;
+      });
+    });
 }
 
 function openFlowStudio(editExisting) {
@@ -1107,7 +1174,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 let imageModalMode = "add";
 
 function syncImageTools(info) {
@@ -1182,7 +1249,7 @@ function readImageFile(file) {
     return;
   }
   if (file.size > IMAGE_MAX_BYTES) {
-    setStatus("Image files must be 5 MB or smaller", "error");
+    setStatus("Image files must be 8 MB or smaller", "error");
     return;
   }
   const reader = new FileReader();

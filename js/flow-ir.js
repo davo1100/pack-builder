@@ -403,9 +403,6 @@ const FlowIR = {
       this.CUSTOMER_HIDE.forEach((id) => {
         if (src.actors.some((actor) => actor.id === id) || src.steps.some((step) => step.id === id)) hidden.add(id);
       });
-      src.actors.forEach((actor) => {
-        if (actor.type === "platform") hidden.add(actor.id);
-      });
     }
     const platform = pres.platform;
     const actors = src.actors.filter((actor) => !hidden.has(actor.id));
@@ -537,7 +534,9 @@ const FlowIR = {
         if (view === "process" || view === "ops") return "";
         const place = field.in && field.in !== "body" && field.in !== "response" && field.in !== "soap" ? `${field.in} ` : "";
         const type = field.type ? `:${field.type}` : "";
-        const example = field.example ? ` = ${this._shortExample(field.example)}` : "";
+        const example = field.example
+          ? `${field.type ? " =" : ":"} ${this._shortExample(field.example)}`
+          : "";
         return `${place}${field.name}${star}${type}${example}`;
       })
       .filter(Boolean);
@@ -561,7 +560,7 @@ const FlowIR = {
       if (status && label.startsWith(status)) label = label.slice(status.length).trim();
       return label;
     }
-    if (step.method && step.path) return `${step.method} ${step.path}`;
+    if (step.method && step.path) return step.path;
     if (step.method) return step.method;
     if (step.path) return step.path;
     if (step.operation) return step.operation;
@@ -572,28 +571,48 @@ const FlowIR = {
     const actors = src?.actors || [];
     const from = actors.find((actor) => actor.id === step.from)?.name || actors.find((actor) => actor.id === step.actor)?.name || "Requester";
     const to = actors.find((actor) => actor.id === step.to)?.name || "Receiver";
-    const action = this._plainAction(step);
+    const action = this._plainAction(step, src);
     if (step.type === "process") return this.isProcessHop(step) ? `${from} → ${to}: ${action}` : action;
     if (step.type === "condition") return /[?？]$/.test(action) ? action : `${action}?`;
     return `${from} → ${to}: ${action}`;
   },
 
-  _plainAction(step) {
+  _plainAction(step, src) {
+    if (step?.type === "process") {
+      const own = String(step.label || "").trim();
+      if (own) return own;
+    }
+    const named = this._actionFromContract(step, src);
+    if (named) return named;
     let label = String(step.label || "").trim();
     label = label.replace(/\b(GET|POST|PUT|PATCH|DELETE|SOAP|REST|API|HTTP)\b/gi, "");
     label = label.replace(/\/[A-Za-z0-9._~-]+/g, "");
     label = label.replace(/\b[1-5]\d{2}\b/g, "");
     label = label.replace(/\s{2,}/g, " ").replace(/^[-:.\s]+|[-:.\s]+$/g, "").trim();
     if (label) return label;
-    if (step.type === "response") return Number(step.status) >= 400 ? "reports a problem" : "confirms completion";
+    if (step.type === "response") return Number(step.status) >= 400 ? "reports a problem" : "confirms creation";
     if (step.type === "condition") return "Decide";
     if (step.type === "process") return "handles the work";
     return step.operation ? String(step.operation).replace(/([a-z])([A-Z])/g, "$1 $2") : "continues the process";
   },
 
+  _actionFromContract(step, src) {
+    let hay = `${step.label || ""} ${step.path || ""} ${step.operation || ""}`;
+    if (step.type === "response" && src?.steps) {
+      const index = src.steps.findIndex((item) => item.id === step.id);
+      const prev = [...src.steps.slice(0, Math.max(0, index))].reverse().find((item) => item.type === "request");
+      if (prev) hay = `${hay} ${prev.path || ""} ${prev.label || ""}`;
+    }
+    if (/accountholders/i.test(hay)) return step.type === "response" ? "account holder created" : "create account holder";
+    if (/\/cards\b|card_profile/i.test(hay)) return step.type === "response" ? "card created" : "issue card";
+    if (/\/accounts\b/i.test(hay)) return step.type === "response" ? "account created" : "create account";
+    return "";
+  },
+
   _shortExample(value) {
     const text = String(value || "").trim();
-    return text.length > 28 ? `${text.slice(0, 25)}…` : text;
+    if (/^<[^>]+>/.test(text) && text.length <= 56) return text;
+    return text.length > 42 ? `${text.slice(0, 39)}…` : text;
   },
 
   makeCustomerReady(model) {

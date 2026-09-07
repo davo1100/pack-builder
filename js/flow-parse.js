@@ -101,30 +101,60 @@ const FlowParse = {
   },
 
   listWsdl(text) {
-    const redacted = FlowIR.redact(String(text || "").trim());
-    if (!redacted) return { ok: false, errors: ["Paste or upload a Chopin WSDL first"], operations: [] };
+    const raw = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (!raw) return { ok: false, errors: ["Paste or upload a Chopin WSDL, XML, or SoapUI project first"], operations: [] };
     if (typeof DOMParser === "undefined") {
       return { ok: false, errors: ["WSDL import needs a browser"], operations: [] };
     }
-    const doc = new DOMParser().parseFromString(redacted, "text/xml");
-    const fault = doc.querySelector("parsererror");
-    if (fault) return { ok: false, errors: ["WSDL XML is invalid"], operations: [] };
-    const root = doc.documentElement;
-    const rootName = this._xmlLocal(root);
-    if (!root || !["definitions", "description"].includes(rootName)) {
-      return { ok: false, errors: ["This file is not a WSDL (needs definitions or description)"], operations: [] };
+    const embedded = this._embeddedWsdls(raw);
+    if (embedded.length) {
+      const merged = this.mergeListed(embedded.map((wsdl) => this._parseWsdlXml(wsdl)));
+      if (merged.ok) {
+        const name = this._soapUiProjectName(raw);
+        if (name && !merged.title) merged.title = name;
+        return merged;
+      }
     }
-    const operations = this._listWsdlOperations(root);
+    const parsed = this._parseWsdlXml(raw);
+    if (parsed.ok) return parsed;
+    const soapOps = this._listSoapUiOperations(raw);
+    if (soapOps.length) {
+      return {
+        ok: true,
+        errors: [],
+        title: this._soapUiProjectName(raw) || "SoapUI",
+        version: "",
+        protocol: "SOAP",
+        operations: soapOps,
+      };
+    }
+    return parsed;
+  },
+
+  _parseWsdlXml(text) {
+    const xml = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (!xml) return { ok: false, errors: ["That XML is empty"], operations: [] };
+    const doc = new DOMParser().parseFromString(xml, "text/xml");
+    const fault = doc.querySelector("parsererror");
+    if (fault) return { ok: false, errors: ["That XML is invalid"], operations: [] };
+    const root = this._wsdlRoot(doc);
+    let operations = root ? this._listWsdlOperations(root) : [];
+    if (!operations.length) operations = this._listSchemaOperations(doc.documentElement);
     if (!operations.length) {
-      const imported = this._xmlKids(root, "import").length;
+      const imported = this._xmlKids(doc.documentElement, "import").length + (root ? this._xmlKids(root, "import").length : 0);
       return {
         ok: false,
-        errors: [imported ? "This WSDL only imports other files. Upload the WSDL that contains the operations, or paste those files too." : "No SOAP operations found in the WSDL"],
+        errors: [
+          imported
+            ? "This XML only imports other files. Upload the WSDL or XML that contains the operations, or paste those files too."
+            : "No SOAP operations found in this WSDL or XML",
+        ],
         operations: [],
       };
     }
-    const service = this._xmlAll(root, "service")[0];
-    const title = this._xmlAttr(service, "name") || this._xmlAttr(root, "name") || "Chopin";
+    const titleNode = root || doc.documentElement;
+    const service = this._xmlAll(titleNode, "service")[0];
+    const title = this._xmlAttr(service, "name") || this._xmlAttr(titleNode, "name") || "Chopin";
     operations.forEach((item) => {
       item.source = item.source || title;
     });
@@ -136,6 +166,64 @@ const FlowParse = {
       protocol: "SOAP",
       operations,
     };
+  },
+
+  _isSoapUiProject(text) {
+    return /<(?:[\w.-]+:)?soapui-project\b/i.test(text) || /eviware\.com\/soapui/i.test(text);
+  },
+
+  _soapUiProjectName(text) {
+    const match = String(text || "").match(/<(?:[\w.-]+:)?soapui-project\b[^>]*\bname="([^"]+)"/i);
+    return match ? match[1] : "";
+  },
+
+  _embeddedWsdls(text) {
+    const value = String(text || "");
+    const found = [];
+    const seen = new Set();
+    const push = (wsdl) => {
+      const clean = String(wsdl || "").trim();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      found.push(clean);
+    };
+    const cdata = /<!\[CDATA\[\s*(<(?:[\w.-]+:)?(?:definitions|description)\b[\s\S]*?<\/(?:[\w.-]+:)?(?:definitions|description)>)\s*\]\]>/gi;
+    let match;
+    while ((match = cdata.exec(value))) push(match[1]);
+    if (found.length) return found;
+    if (this._isSoapUiProject(value) || /<(?:[\w.-]+:)?definitionCache\b/i.test(value)) {
+      const defs = value.match(/<(?:[\w.-]+:)?(?:definitions|description)\b[\s\S]*?<\/(?:[\w.-]+:)?(?:definitions|description)>/gi) || [];
+      defs.forEach(push);
+    }
+    return found;
+  },
+
+  _listSoapUiOperations(text) {
+    if (!this._isSoapUiProject(text)) return [];
+    const stripped = String(text || "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+    const names = [];
+    const seen = new Set();
+    const re = /<(?:[\w.-]+:)?operation\b[^>]*\bname="([^"]+)"/gi;
+    let match;
+    while ((match = re.exec(stripped))) {
+      const name = String(match[1] || "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+    }
+    return names.map((name) => this._soapOperation({ name, summary: name }));
+  },
+
+  _wsdlRoot(doc) {
+    const root = doc?.documentElement;
+    if (!root) return null;
+    const name = this._xmlLocal(root);
+    if (["definitions", "description"].includes(name)) return root;
+    return (
+      this._xmlAll(root, "definitions")[0] ||
+      this._xmlAll(root, "description")[0] ||
+      (this._xmlAll(root, "portType").length || this._xmlAll(root, "interface").length ? root : null)
+    );
   },
 
   _listOperations(spec) {
@@ -253,7 +341,7 @@ const FlowParse = {
           endpoint: slim.key,
           platforms: ["chopin"],
           chopin: { operation: slim.operation, namespace: slim.namespace, supported: true },
-          fields: this._hopFields(item.requestFields),
+          fields: this._hopFields(item.requestFields, 32),
         },
         {
           id: `ok-${slug}`,
@@ -264,7 +352,7 @@ const FlowParse = {
           endpoint: slim.key,
           platforms: ["chopin"],
           chopin: { operation: slim.operation, namespace: slim.namespace, supported: true },
-          fields: [],
+          fields: this._hopFields(item.okFields?.length ? item.okFields : item.responseFields, 32),
         },
       ];
     }
@@ -530,11 +618,12 @@ const FlowParse = {
     return out;
   },
 
-  _hopFields(fields) {
+  _hopFields(fields, limit = 8) {
     const list = this._uniqueFields(fields);
-    const top = list.filter((field) => !field.name.includes(".") && !field.name.includes("["));
-    const nested = list.filter((field) => field.name.includes(".") || field.name.includes("["));
-    return [...top, ...nested].slice(0, 8);
+    const isLeaf = (field) => field.type && !["object", "array", "element"].includes(field.type);
+    const leaves = list.filter(isLeaf);
+    const rest = list.filter((field) => !isLeaf(field));
+    return [...leaves, ...rest].slice(0, Math.max(1, Number(limit) || 8));
   },
 
   _resolveRef(spec, node, depth = 0) {
@@ -583,34 +672,18 @@ const FlowParse = {
     const operations = [];
     const addOp = (name, inputRef, outputRef, faultRef, summary, node) => {
       if (!name) return;
-      const requestFields = this._wsdlMessageFields(messages, types, inputRef, node, "soap");
-      const okFields = this._wsdlMessageFields(messages, types, outputRef, node, "response");
-      const errFields = this._wsdlMessageFields(messages, types, faultRef, node, "response");
-      operations.push({
-        key: `SOAP ${name}`,
-        method: "SOAP",
-        path: name,
-        protocol: "SOAP",
-        operation: name,
-        operationId: name,
-        namespace,
-        soapAction: actions[name] || "",
-        summary: summary || "",
-        source: "",
-        tags: ["Chopin"],
-        hasAuth: false,
-        authName: "",
-        okCode: "",
-        okLabel: summary || "OK",
-        errCode: faultRef ? "Fault" : "",
-        errLabel: faultRef ? "SOAP Fault" : "",
-        serverCode: "",
-        requestFields: requestFields.map((field) => ({ ...field, side: "request", in: field.in || "soap" })),
-        responseFields: this._uniqueFields([...okFields, ...errFields]).map((field) => ({ ...field, side: "response" })),
-        okFields,
-        errFields,
-        serverFields: [],
-      });
+      operations.push(
+        this._soapOperation({
+          name,
+          namespace,
+          soapAction: actions[name] || "",
+          summary,
+          requestFields: this._wsdlMessageFields(messages, types, inputRef, node, "soap"),
+          okFields: this._wsdlMessageFields(messages, types, outputRef, node, "response"),
+          errFields: this._wsdlMessageFields(messages, types, faultRef, node, "response"),
+          faultRef,
+        })
+      );
     };
     this._xmlAll(root, "portType").forEach((port) => {
       this._xmlKids(port, "operation").forEach((op) => {
@@ -645,6 +718,75 @@ const FlowParse = {
     return operations;
   },
 
+  _listSchemaOperations(root) {
+    if (!root) return [];
+    const types = this._wsdlTypes(root);
+    const schemas = this._xmlSchemas(root);
+    if (!schemas.length) return [];
+    const namespace = this._xmlAttr(root, "targetNamespace") || this._xmlAttr(schemas[0], "targetNamespace");
+    const elements = [];
+    schemas.forEach((schema) => {
+      this._xmlKids(schema, "element").forEach((el) => {
+        const name = this._xmlAttr(el, "name");
+        if (name) elements.push({ el, name });
+      });
+    });
+    const byName = Object.fromEntries(elements.map((item) => [item.name, item]));
+    const operations = [];
+    elements.forEach(({ el, name }) => {
+      if (/Response$|Fault$|Result$|Out$/i.test(name)) return;
+      const response = byName[`${name}Response`] || byName[`${name}Result`] || byName[`${name}Out`];
+      operations.push(
+        this._soapOperation({
+          name,
+          namespace,
+          summary: this._xmlText(el),
+          requestFields: this._flattenXsdElement(el, types, "soap", "", true, 0, new Set(), true),
+          okFields: response ? this._flattenXsdElement(response.el, types, "response", "", true, 0, new Set(), true) : [],
+          errFields: [],
+        })
+      );
+    });
+    return operations;
+  },
+
+  _soapOperation({ name, namespace, soapAction, summary, requestFields, okFields, errFields, faultRef }) {
+    const request = (requestFields || []).map((field) => ({ ...field, side: "request", in: field.in || "soap" }));
+    const ok = okFields || [];
+    const err = errFields || [];
+    return {
+      key: `SOAP ${name}`,
+      method: "SOAP",
+      path: name,
+      protocol: "SOAP",
+      operation: name,
+      operationId: name,
+      namespace: namespace || "",
+      soapAction: soapAction || "",
+      summary: summary || "",
+      source: "",
+      tags: ["Chopin"],
+      hasAuth: false,
+      authName: "",
+      okCode: "",
+      okLabel: summary || "OK",
+      errCode: faultRef ? "Fault" : "",
+      errLabel: faultRef ? "SOAP Fault" : "",
+      serverCode: "",
+      requestFields: request,
+      responseFields: this._uniqueFields([...ok, ...err]).map((field) => ({ ...field, side: "response" })),
+      okFields: ok,
+      errFields: err,
+      serverFields: [],
+    };
+  },
+
+  _xmlSchemas(root) {
+    const found = this._xmlAll(root, "schema");
+    if (this._xmlLocal(root) === "schema" && !found.includes(root)) found.unshift(root);
+    return found;
+  },
+
   _wsdlSoapActions(root) {
     const actions = {};
     this._xmlAll(root, "binding").forEach((binding) => {
@@ -663,7 +805,7 @@ const FlowParse = {
 
   _wsdlTypes(root) {
     const types = {};
-    this._xmlAll(root, "schema").forEach((schema) => {
+    this._xmlSchemas(root).forEach((schema) => {
       const tns = this._xmlAttr(schema, "targetNamespace");
       const add = (el, kind) => {
         const name = this._xmlAttr(el, "name");
@@ -785,7 +927,7 @@ const FlowParse = {
   },
 
   _flattenXsdElement(el, types, location, prefix, required, depth, seen, unwrap) {
-    if (!el || depth > 8) return [];
+    if (!el || depth > 16) return [];
     const ownName = this._xmlAttr(el, "name") || this._qname(this._xmlAttr(el, "ref"), el).local;
     const name = prefix || ownName;
     const ref = this._xmlAttr(el, "ref");
@@ -816,8 +958,15 @@ const FlowParse = {
     return name ? [this._makeField(name, location, required, { type: "element" })] : [];
   },
 
+  _xsdBaseRef(typeEl) {
+    if (!typeEl) return "";
+    const content = this._xmlKids(typeEl, "complexContent")[0] || this._xmlKids(typeEl, "simpleContent")[0] || typeEl;
+    const inherited = this._xmlKids(content, "extension")[0] || this._xmlKids(content, "restriction")[0];
+    return inherited ? this._xmlAttr(inherited, "base") : "";
+  },
+
   _flattenXsdType(typeEl, types, location, prefix, required, depth, seen) {
-    if (!typeEl || depth > 8) return [];
+    if (!typeEl || depth > 16) return [];
     if (this._xmlLocal(typeEl) === "simpleType") {
       const restriction = this._xmlKids(typeEl, "restriction")[0];
       const base = restriction ? this._xsdBuiltin(this._xmlAttr(restriction, "base")) : "";
@@ -827,6 +976,21 @@ const FlowParse = {
     }
     const out = [];
     if (prefix) out.push(this._makeField(prefix, location, required, { type: "object" }));
+    const baseRef = this._xsdBaseRef(typeEl);
+    if (baseRef && !this._xsdBuiltin(baseRef)) {
+      const key = `${this._qname(baseRef, typeEl).ns}|${this._qname(baseRef, typeEl).local}`;
+      if (!seen.has(key)) {
+        const nextSeen = new Set(seen);
+        nextSeen.add(key);
+        const resolved = this._xsdLookup(types, baseRef, typeEl);
+        if (resolved) {
+          const inherited = this._flattenXsdType(resolved.el, types, location, prefix, required, depth + 1, nextSeen);
+          out.push(...inherited.filter((field) => field.name !== prefix));
+        }
+      }
+    } else if (baseRef && this._xsdBuiltin(baseRef) && prefix) {
+      out[0] = this._makeField(prefix, location, required, { type: this._xsdBuiltin(baseRef) });
+    }
     this._xsdParticles(typeEl).forEach((child) => {
       const childName = this._xmlAttr(child, "name") || this._qname(this._xmlAttr(child, "ref"), child).local;
       const childPrefix = prefix && childName ? `${prefix}.${childName}` : childName;
@@ -881,17 +1045,30 @@ const FlowParse = {
     return String(doc?.textContent || "").replace(/\s+/g, " ").trim();
   },
 
+  _xmlns(node, prefix) {
+    if (!node) return "";
+    if (typeof node.lookupNamespaceURI === "function") {
+      const ns = node.lookupNamespaceURI(prefix || null);
+      if (ns) return ns;
+    }
+    let cur = node;
+    while (cur && cur.nodeType === 1) {
+      const attr = prefix ? `xmlns:${prefix}` : "xmlns";
+      if (typeof cur.getAttribute === "function") {
+        const value = cur.getAttribute(attr);
+        if (value) return value;
+      }
+      cur = cur.parentElement || cur.parentNode;
+    }
+    return "";
+  },
+
   _qname(value, node) {
     const text = String(value || "").trim();
     const index = text.indexOf(":");
-    if (index < 0) {
-      return { ns: (typeof node?.lookupNamespaceURI === "function" && node.lookupNamespaceURI(null)) || "", local: text };
-    }
+    if (index < 0) return { ns: this._xmlns(node, ""), local: text };
     const prefix = text.slice(0, index);
-    return {
-      ns: (typeof node?.lookupNamespaceURI === "function" && node.lookupNamespaceURI(prefix)) || "",
-      local: text.slice(index + 1),
-    };
+    return { ns: this._xmlns(node, prefix), local: text.slice(index + 1) };
   },
 
   _slug(value) {

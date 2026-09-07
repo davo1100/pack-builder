@@ -1464,6 +1464,11 @@ h2.section:first-child {
   margin-top: 10px;
 }
 
+.flow-import.is-over {
+  outline: 2px solid var(--accent, #7e6de2);
+  outline-offset: 2px;
+}
+
 .flow-import summary {
   cursor: pointer;
   font-size: 0.78rem;

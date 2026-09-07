@@ -45,6 +45,7 @@ const PackEditor = {
   lastTable: null,
   lastDiagram: null,
   lastFlow: null,
+  pendingFlowReplace: null,
   lastCode: null,
   loadedId: null,
   pendingId: null,
@@ -69,6 +70,7 @@ const PackEditor = {
     this.lastTable = null;
     this.lastDiagram = null;
     this.lastFlow = null;
+    this.pendingFlowReplace = null;
     this.lastCode = null;
     this.loadedId = null;
     this.pendingId = pageId || null;
@@ -127,6 +129,24 @@ const PackEditor = {
     .pack-image-left { margin-right: auto; margin-left: 0; }
     .pack-image-center { margin-left: auto; margin-right: auto; }
     .pack-image-right { margin-left: auto; margin-right: 0; }
+    [data-flow-candidate] {
+      position: relative;
+    }
+    [data-flow-candidate]::before {
+      content: "API flow";
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font: 700 10px Arial, sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #fff;
+      background: #7E6DE2;
+      border-radius: 999px;
+      padding: 2px 7px;
+      pointer-events: none;
+      z-index: 3;
+    }
     .pack-image-handle {
       position: absolute;
       right: -5px;
@@ -407,6 +427,57 @@ const PackEditor = {
     img.setAttribute("src", safeSrc);
     this._changed();
     return true;
+  },
+
+  flowImageFromSelection() {
+    const host =
+      this.pendingFlowReplace && this.root()?.contains(this.pendingFlowReplace)
+        ? this.pendingFlowReplace
+        : this.imageFromSelection() || this.diagramFromSelection();
+    if (!host || host.matches?.(".pack-flow") || host.closest?.(".pack-flow")) return null;
+    const img = host.matches?.("img") ? host : host.querySelector?.("img");
+    const svg = host.matches?.("svg") ? host : host.querySelector?.("svg");
+    const src =
+      img?.currentSrc ||
+      img?.src ||
+      img?.getAttribute("src") ||
+      img?.getAttribute("data-image-src") ||
+      "";
+    if (!img && !svg) return null;
+    return { el: host, img, svg, src, alt: img?.getAttribute("alt") || "" };
+  },
+
+  replaceFlowSource(html) {
+    const source = this.flowImageFromSelection();
+    const current = source?.el;
+    this.pendingFlowReplace = null;
+    if (current) {
+      current.outerHTML = html;
+      this.lastDiagram = null;
+      this.lastFlow = null;
+      this._prepare();
+      this._changed();
+      return true;
+    }
+    this.insertHtml(html);
+    return true;
+  },
+
+  _markFlowCandidates() {
+    const root = this.root();
+    if (!root) return;
+    root.querySelectorAll(".pack-image img, .diagram-container img").forEach((img) => {
+      const host = img.closest(".pack-image, .diagram-container");
+      if (!host) return;
+      const apply = () => {
+        const yes = typeof FlowImage !== "undefined" && FlowImage.looksLikeDiagram(img);
+        if (yes) host.setAttribute("data-flow-candidate", "true");
+        else host.removeAttribute("data-flow-candidate");
+        if (this.selected === host || host.contains?.(this.selected)) this.onSelect(this.selectionInfo());
+      };
+      apply();
+      if (!img.complete || !img.naturalWidth) img.addEventListener("load", apply, { once: true });
+    });
   },
 
   _sectionFromSelection() {
@@ -826,6 +897,7 @@ const PackEditor = {
     this._refreshFlows();
     root.setAttribute("contenteditable", "true");
     this._wrapLooseImages();
+    this._markFlowCandidates();
     root.querySelectorAll(BLOCK_SELECTOR).forEach((el) => el.setAttribute("data-layout-block", "true"));
     root.querySelectorAll(".pack-image").forEach((figure) => {
       figure.setAttribute("contenteditable", "false");

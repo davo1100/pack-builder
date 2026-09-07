@@ -96,8 +96,9 @@ const FlowRender = {
     if (!views.length) return { ok: false, errors: errors.length ? errors : ["Could not draw the flow"], html: "" };
     const json = options?.embed === false ? "" : this.attr(JSON.stringify(source));
     const id = this.uid("pf");
+    const preferred = FlowIR.audienceOf(source.presentation?.audience);
     const radios = views
-      .map((view, index) => `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${index === 0 ? " checked" : ""}>`)
+      .map((view) => `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${view.key === preferred ? " checked" : ""}>`)
       .join("");
     const tabs = `<div class="pack-flow-tabs" role="tablist">${views
       .map((view) => `<label class="pack-flow-tab" for="${id}-${view.key}">${this.escape(view.label)}</label>`)
@@ -497,11 +498,11 @@ const FlowRender = {
     const badge = showTech && method && step.type === "request" ? method : showTech && step.status ? String(step.status) : "";
     const padX = 16;
     const padY = 12;
-    const maxInner = 220;
+    const maxInner = 300;
     const badgeW = badge ? Math.max(36, this._monoWidth(badge, 9) + 16) : 0;
     const badgeGap = badge ? 8 : 0;
     const captionLines = this._wrapToWidth(step.caption || step.label || "", 11, Math.max(72, maxInner - badgeW - badgeGap));
-    const fields = (Array.isArray(step.fieldChips) ? step.fieldChips : []).map((line) => this._clipToWidth(line, 9, maxInner, true));
+    const fields = (Array.isArray(step.fieldChips) ? step.fieldChips : []).flatMap((line) => this._wrapFieldChip(line, 9, maxInner));
     const captionW = Math.max(...captionLines.map((line) => this._textWidth(line, 11)), 40);
     const fieldW = fields.length ? Math.max(...fields.map((line) => this._monoWidth(line, 9))) : 0;
     const innerW = Math.max(badgeW + badgeGap + captionW, fieldW, 72);
@@ -652,6 +653,18 @@ const FlowRender = {
     });
     if (current) lines.push(current);
     return lines;
+  },
+
+  _wrapFieldChip(text, fontSize, maxW) {
+    const raw = String(text || "");
+    if (this._monoWidth(raw, fontSize) <= maxW) return [raw];
+    const colon = raw.indexOf(": ");
+    if (colon > 0 && colon < raw.length - 2) {
+      const name = raw.slice(0, colon);
+      const rest = raw.slice(colon + 2);
+      return [`${name}:`, this._clipToWidth(rest, fontSize, maxW, true)];
+    }
+    return [this._clipToWidth(raw, fontSize, maxW, true)];
   },
 
   _clipToWidth(text, fontSize, maxW, mono) {

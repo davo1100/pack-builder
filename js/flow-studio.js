@@ -22,6 +22,8 @@ const FlowStudio = {
     this.customerUndo = null;
     this.onSave = onSave || (() => {});
     document.getElementById("flow-modal").hidden = false;
+    const preview = document.getElementById("flow-preview");
+    if (preview) preview.innerHTML = "";
     this._rememberCatalogs(this.model);
     this._bindOnce();
     this._renderAll();
@@ -151,6 +153,7 @@ const FlowStudio = {
     document.getElementById("flow-wsdl-list").addEventListener("change", () => this._wsdlCount());
     document.getElementById("flow-openapi-file").addEventListener("change", (event) => this._readOpenApiFiles(event));
     document.getElementById("flow-wsdl-file").addEventListener("change", (event) => this._readWsdlFiles(event));
+    this._bindWsdlDrop();
     document.getElementById("flow-image-choose").addEventListener("click", () => document.getElementById("flow-image-file").click());
     document.getElementById("flow-image-file").addEventListener("change", (event) => this._readImageFile(event));
     document.getElementById("flow-image-compile").addEventListener("click", () => this._compileImage());
@@ -174,8 +177,13 @@ const FlowStudio = {
     });
     drop.addEventListener("drop", (event) => {
       event.preventDefault();
-      const file = event.dataTransfer?.files?.[0];
-      if (file) this._acceptImage(file);
+      const files = [...(event.dataTransfer?.files || [])];
+      const soap = files.filter((file) => this._isWsdlFile(file));
+      if (soap.length) {
+        this._ingestWsdlFiles(soap);
+        return;
+      }
+      if (files[0]) this._acceptImage(files[0]);
     });
     document.addEventListener("paste", (event) => this._onImagePaste(event));
     document.getElementById("flow-actors").addEventListener("input", (event) => {
@@ -239,9 +247,10 @@ const FlowStudio = {
     if (host.querySelector(".pack-flow")) return host;
     this._previewId = this._previewId || FlowRender.uid("pf");
     const id = this._previewId;
+    const preferred = FlowIR.audienceOf(this.model?.presentation?.audience);
     const radios = FlowIR.VIEWERS.map(
-      (view, index) =>
-        `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${index === 0 ? " checked" : ""}>`
+      (view) =>
+        `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${view.key === preferred ? " checked" : ""}>`
     ).join("");
     const tabs = `<div class="pack-flow-tabs" role="tablist">${FlowIR.VIEWERS.map(
       (view) => `<label class="pack-flow-tab" for="${id}-${view.key}">${this._esc(view.label)}</label>`
@@ -562,13 +571,14 @@ const FlowStudio = {
         step.label = item.okLabel || "OK";
         step.platforms = [...new Set([...(step.platforms || []), "chopin"])];
         step.chopin = { operation: item.operation, namespace: item.namespace, supported: true };
+        step.fields = FlowParse._hopFields(item.okFields?.length ? item.okFields : item.responseFields, 32);
         return;
       }
       step.label = item.summary || item.operation || item.key;
       step.operation = item.operation;
       step.chopin = { operation: item.operation, namespace: item.namespace || "", supported: true };
       step.platforms = [...new Set([...(step.platforms || []), "chopin"])];
-      step.fields = FlowParse._hopFields(item.requestFields);
+      step.fields = FlowParse._hopFields(item.requestFields, 32);
       return;
     }
     if (step.type === "response") {
@@ -1473,7 +1483,7 @@ const FlowStudio = {
         this._applyWsdlList(this.wsdlOps);
         return;
       }
-      this._errors(["Paste or upload a Chopin WSDL first"]);
+      this._errors(["Paste or upload a Chopin WSDL, XML, or SoapUI project first"]);
       return;
     }
     const listed = FlowParse.listWsdl(text);
@@ -1486,12 +1496,48 @@ const FlowStudio = {
     this._applyWsdlList(FlowParse.mergeListed([this.wsdlOps, listed]));
   },
 
+  _bindWsdlDrop() {
+    const box = document.getElementById("flow-wsdl-box");
+    if (!box) return;
+    ["dragenter", "dragover"].forEach((type) => {
+      box.addEventListener(type, (event) => {
+        if (![...event.dataTransfer?.items || []].some((item) => item.kind === "file")) return;
+        event.preventDefault();
+        box.classList.add("is-over");
+      });
+    });
+    ["dragleave", "drop"].forEach((type) => {
+      box.addEventListener(type, () => box.classList.remove("is-over"));
+    });
+    box.addEventListener("drop", (event) => {
+      const files = [...(event.dataTransfer?.files || [])].filter((file) => this._isWsdlFile(file));
+      if (!files.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this._ingestWsdlFiles(files);
+    });
+  },
+
+  _isWsdlFile(file) {
+    const name = String(file?.name || "").toLowerCase();
+    const type = String(file?.type || "").toLowerCase();
+    return /\.(wsdl|xml)$/i.test(name) || type.includes("xml") || type.includes("wsdl");
+  },
+
   _readWsdlFiles(event) {
     const files = [...(event.target.files || [])];
     event.target.value = "";
-    if (!files.length) return;
+    this._ingestWsdlFiles(files);
+  },
+
+  _ingestWsdlFiles(files) {
+    const list = (files || []).filter((file) => this._isWsdlFile(file));
+    if (!list.length) {
+      this._errors(["Use a .wsdl or .xml file"]);
+      return;
+    }
     Promise.all(
-      files.map((file) =>
+      list.map((file) =>
         file.text().then((text) => {
           const listed = FlowParse.listWsdl(text);
           listed.file = file.name;
@@ -1501,7 +1547,7 @@ const FlowStudio = {
       )
     )
       .then((results) => this._applyWsdlList(FlowParse.mergeListed([this.wsdlOps, ...results])))
-      .catch((err) => this._errors([`Could not read WSDL files: ${err.message}`]));
+      .catch((err) => this._errors([`Could not read WSDL or XML files: ${err.message}`]));
   },
 
   _applyWsdlList(listed) {
@@ -1707,7 +1753,7 @@ const FlowStudio = {
     if (button) button.disabled = true;
     this._setImageStatus("Creating the flow…");
     this._errors([]);
-    FlowImage.fromFile(this._imageFile, {
+    FlowImage.read(this._imageFile, {
       platform: this.model?.presentation?.platform || "darwin",
       onStatus: (text) => this._setImageStatus(text),
     })

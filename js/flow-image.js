@@ -28,6 +28,22 @@ const FlowImage = {
   _worker: null,
   _tessReady: null,
 
+  read(input, options = {}) {
+    if (!input) return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+    if (typeof input === "string") return this.fromSrc(input, options);
+    const tag = String(input.tagName || "").toLowerCase();
+    if (tag === "img") return this.fromImage(input, options);
+    if (tag === "svg") return this.fromSvgNode(input, options);
+    if (tag && (typeof input.querySelector === "function" || typeof input.matches === "function")) {
+      return this.fromElement(input, options);
+    }
+    if (typeof File !== "undefined" && input instanceof File) return this.fromFile(input, options);
+    if (typeof Blob !== "undefined" && input instanceof Blob) {
+      return this.fromFile(new File([input], "diagram.png", { type: input.type || "image/png" }), options);
+    }
+    return Promise.resolve({ ok: false, errors: ["That image cannot be converted"], model: null });
+  },
+
   fromFile(file, options = {}) {
     if (!file) return Promise.resolve({ ok: false, errors: ["Choose a flow image first"], model: null });
     if (file.size > this.MAX_BYTES) return Promise.resolve({ ok: false, errors: ["That image is larger than 8 MB"], model: null });
@@ -36,7 +52,13 @@ const FlowImage = {
     const svg = type.includes("svg") || name.endsWith(".svg");
     const html = type.includes("html") || name.endsWith(".html") || name.endsWith(".htm");
     if (svg || html || type === "application/xml" || type === "text/xml") {
-      return file.text().then((text) => this.fromMarkup(text, options));
+      return file.text().then((text) => {
+        const stored = this._storedModel(text);
+        if (stored) return stored;
+        return this._rasterizeSvgMarkup(text)
+          .then((url) => this.fromRaster(url, options))
+          .catch(() => this.fromMarkup(text, options));
+      });
     }
     const raster = type.startsWith("image/") || !type || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
     if (!raster) {
@@ -58,13 +80,210 @@ const FlowImage = {
   },
 
   fromRaster(dataUrl, options = {}) {
-    return this._prepareImage(dataUrl)
-      .then((prepared) => this._ocrTokens(prepared, options.onStatus))
-      .then((tokens) => {
-        const built = this._modelFromTokens(tokens, options);
-        if (built.ok || (tokens.tokens || []).length >= 8) return built;
-        return this._ocrTokens(dataUrl, options.onStatus, "6").then((again) => this._modelFromTokens(again, options));
+    return this._prepareImage(dataUrl).then((prepared) => this._ocrBest(prepared, dataUrl, options));
+  },
+
+  _ocrBest(prepared, original, options) {
+    const tryPass = (src, psm) =>
+      this._ocrTokens(src, options.onStatus, psm).then((layout) => {
+        const built = this._modelFromTokens(layout, options);
+        return { built, score: this._scoreBuild(built, layout) };
       });
+    return tryPass(prepared, "11").then((first) => {
+      if (first.score >= 78) return first.built;
+      return tryPass(prepared, "4").then((second) => {
+        const best = second.score > first.score ? second : first;
+        if (best.score >= 70) return best.built;
+        return tryPass(original, "11").then((third) => (third.score > best.score ? third.built : best.built));
+      });
+    });
+  },
+
+  _scoreBuild(built, layout) {
+    if (!built?.ok || !built.model) return 0;
+    const steps = built.model.steps || [];
+    let score = steps.length * 4;
+    score += steps.filter((step) => step.type === "request" && /\/[A-Za-z]/.test(step.path || "")).length * 10;
+    score += steps.filter((step) => step.type === "response" && step.status).length * 8;
+    score += steps.reduce((sum, step) => sum + (step.fields || []).length, 0) * 2;
+    score += (built.model.actors || []).length * 3;
+    score -= steps.filter((step) => /mmm|eee|__|\.J|^=|[|]{2,}/.test(step.label || "")).length * 12;
+    score += Math.min(12, (layout.tokens || []).length);
+    return score;
+  },
+
+  fromSrc(src, options = {}) {
+    let value = String(src || "").trim();
+    if (!value) return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+    if (/^data:image\/svg\+xml/i.test(value)) {
+      const text = this._dataUrlText(value);
+      const stored = this._storedModel(text);
+      if (stored) return Promise.resolve(stored);
+      return this._rasterizeSvgMarkup(text)
+        .then((url) => this.fromRaster(url, options))
+        .catch(() => Promise.resolve(this.fromMarkup(text, options)));
+    }
+    if (/^data:image\//i.test(value)) return this.fromRaster(value, options);
+    if (value.startsWith("//") && typeof location !== "undefined") value = `${location.protocol}${value}`;
+    if (!/^(blob:|data:|https?:\/\/)/i.test(value) && typeof location !== "undefined") {
+      try {
+        value = new URL(value, location.href).href;
+      } catch {
+        /* keep the original string */
+      }
+    }
+    if (value.startsWith("blob:") || /^https?:\/\//i.test(value)) {
+      return fetch(value)
+        .then((response) => {
+          if (!response.ok) throw new Error("Could not download that image");
+          const type = String(response.headers.get("content-type") || "");
+          if (type.includes("text/html") || type.includes("application/json")) {
+            throw new Error("That picture could not be opened");
+          }
+          return response.blob();
+        })
+        .then((blob) => this.fromFile(new File([blob], "diagram.png", { type: blob.type || "image/png" }), options))
+        .catch((err) => ({ ok: false, errors: [err.message || "Could not read that image"], model: null }));
+    }
+    return Promise.resolve({ ok: false, errors: ["That image cannot be converted"], model: null });
+  },
+
+  fromElement(el, options = {}) {
+    if (!el) return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+    const img = el.matches?.("img") ? el : el.querySelector?.("img");
+    if (img) return this.fromImage(img, options);
+    const svg = el.matches?.("svg") ? el : el.querySelector?.("svg");
+    if (svg) return this.fromSvgNode(svg, options);
+    return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+  },
+
+  fromImage(img, options = {}) {
+    if (!img) return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+    const ready = typeof img.decode === "function" ? img.decode().catch(() => {}) : Promise.resolve();
+    return ready.then(() => {
+      const src = String(
+        img.currentSrc || img.src || img.getAttribute?.("src") || img.getAttribute?.("data-image-src") || ""
+      ).trim();
+      const trySrc =
+        src && (/^data:image\//i.test(src) || src.startsWith("blob:") || /^(https?:)?\/\//i.test(src) || !src.startsWith("data:"))
+          ? this.fromSrc(src, options)
+          : Promise.resolve({ ok: false, errors: [], model: null });
+      return trySrc
+        .then((parsed) => {
+          if (parsed?.ok) return parsed;
+          return this._fileFromDrawnImage(img).then((file) => this.fromFile(file, options));
+        })
+        .catch(() => this._fileFromDrawnImage(img).then((file) => this.fromFile(file, options)));
+    });
+  },
+
+  fromSvgNode(svg, options = {}) {
+    if (!svg) return Promise.resolve({ ok: false, errors: ["No image to convert"], model: null });
+    const clone = svg.cloneNode(true);
+    if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const xml = new XMLSerializer().serializeToString(clone);
+    const stored = this._storedModel(xml);
+    if (stored) return Promise.resolve(stored);
+    return this._rasterizeSvgMarkup(xml)
+      .then((url) => this.fromRaster(url, options))
+      .catch(() => Promise.resolve(this.fromMarkup(xml, options)));
+  },
+
+  _fileFromDrawnImage(img) {
+    return new Promise((resolve, reject) => {
+      const width = Math.max(0, Number(img.naturalWidth || img.width || 0));
+      const height = Math.max(0, Number(img.naturalHeight || img.height || 0));
+      if (width < 8 || height < 8) {
+        reject(new Error("That picture could not be opened"));
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Could not read that image"));
+        return;
+      }
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, width, height);
+      try {
+        ctx.drawImage(img, 0, 0, width, height);
+      } catch {
+        reject(new Error("Could not read that image"));
+        return;
+      }
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Could not read that image"));
+          return;
+        }
+        resolve(new File([blob], "diagram.png", { type: "image/png" }));
+      }, "image/png");
+    });
+  },
+
+  _rasterizeSvgMarkup(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return Promise.reject(new Error("That picture could not be opened"));
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(raw)}`;
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, img.naturalWidth || img.width || 800);
+        canvas.height = Math.max(1, img.naturalHeight || img.height || 600);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Could not read that image"));
+          return;
+        }
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => reject(new Error("That picture could not be opened"));
+      img.src = url;
+    });
+  },
+
+  looksLikeDiagram(img) {
+    if (!img) return false;
+    if (img.closest?.(".diagram-container") && !img.closest(".pack-flow")) return true;
+    const alt = String(img.getAttribute?.("alt") || "").toLowerCase();
+    const src = String(img.getAttribute?.("src") || img.src || "").toLowerCase();
+    if (/sequence|flow|uml|plantuml|swimlane|lifeline|accountholder|diagram/.test(`${alt} ${src}`)) return true;
+    const width = Number(img.naturalWidth || img.width || 0);
+    const height = Number(img.naturalHeight || img.height || 0);
+    if (/logo|icon|favicon|avatar/i.test(`${alt} ${src}`) && width < 480) return false;
+    if (width >= 480 && height >= 300) return true;
+    if (width >= 280 && height >= 360 && height / width >= 1.12) return true;
+    if (/image\/svg|\.svg(\?|$)/.test(src) && (height >= 180 || width >= 240)) return true;
+    return false;
+  },
+
+  _dataUrlText(dataUrl) {
+    const comma = String(dataUrl || "").indexOf(",");
+    if (comma < 0) return "";
+    const meta = dataUrl.slice(0, comma);
+    const payload = dataUrl.slice(comma + 1);
+    if (/;base64/i.test(meta)) {
+      try {
+        return decodeURIComponent(escape(atob(payload)));
+      } catch {
+        try {
+          return atob(payload);
+        } catch {
+          return "";
+        }
+      }
+    }
+    try {
+      return decodeURIComponent(payload);
+    } catch {
+      return payload;
+    }
   },
 
   dispose() {
@@ -170,9 +389,17 @@ const FlowImage = {
         const y = Number(box.y0 || 0);
         const w = Math.max(6, Number(box.x1 || 0) - x);
         const h = Math.max(8, Number(box.y1 || 0) - y);
-        return { text: String(item.text).replace(/\s+/g, " ").trim(), x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+        return {
+          text: this._normalizeTokenText(item.text),
+          x,
+          y,
+          w,
+          h,
+          cx: x + w / 2,
+          cy: y + h / 2,
+        };
       })
-      .filter((token) => token.text && !/^[\W_]+$/.test(token.text));
+      .filter((token) => token.text && !/^[\W_]+$/.test(token.text) && !/^(oa|de|eview)$/i.test(token.text));
   },
 
   _mergeTokenSets(lines, words) {
@@ -185,7 +412,7 @@ const FlowImage = {
       });
     (words || []).forEach((word) => {
       if (covered(word)) return;
-      if (!/\b(business|client|cent|eps|pps|darwin|member|application)\b/i.test(word.text)) return;
+      if (!/\b(business|client|cent|eps|pps|darwin|member|application|organisation|organization|spend|policy|kyb|kyc)\b/i.test(word.text)) return;
       out.push({ ...word });
     });
     return out.sort((a, b) => a.cy - b.cy || a.x - b.x);
@@ -194,11 +421,21 @@ const FlowImage = {
   _ocrWorker(psm) {
     return this._loadTesseract().then((Tesseract) => {
       if (this._worker) {
-        return this._worker.setParameters({ tessedit_pageseg_mode: String(psm || "11") }).then(() => this._worker);
+        return this._worker
+          .setParameters({
+            tessedit_pageseg_mode: String(psm || "11"),
+            preserve_interword_spaces: "1",
+          })
+          .then(() => this._worker);
       }
       return Tesseract.createWorker("eng").then((worker) => {
         this._worker = worker;
-        return worker.setParameters({ tessedit_pageseg_mode: String(psm || "11") }).then(() => worker);
+        return worker
+          .setParameters({
+            tessedit_pageseg_mode: String(psm || "11"),
+            preserve_interword_spaces: "1",
+          })
+          .then(() => worker);
       });
     });
   },
@@ -238,7 +475,7 @@ const FlowImage = {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const scale = img.width < 1100 ? Math.min(2.2, 1400 / img.width) : img.width > 2200 ? 1800 / img.width : 1;
+        const scale = img.width < 1400 ? Math.min(2, 1700 / img.width) : img.width > 2200 ? 1800 / img.width : 1;
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(img.width * scale));
         canvas.height = Math.max(1, Math.round(img.height * scale));
@@ -250,6 +487,19 @@ const FlowImage = {
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        try {
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = pixels.data;
+          for (let i = 0; i < data.length; i += 4) {
+            let value = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            value = (value - 128) * 1.45 + 128;
+            value = value < 48 ? 0 : value > 210 ? 255 : value;
+            data[i] = data[i + 1] = data[i + 2] = value;
+          }
+          ctx.putImageData(pixels, 0, 0);
+        } catch {
+          /* keep the scaled colour image */
+        }
         resolve(canvas.toDataURL("image/png"));
       };
       img.onerror = () => reject(new Error("That picture could not be opened"));
@@ -274,6 +524,7 @@ const FlowImage = {
     if (!rows.length) return { ok: false, errors: ["Could not read the diagram layout"], model: null };
     const platform = this._platformOf(tokens, options.platform);
     let actors = this._actorsOf(rows, tokens);
+    actors = this._rejectStepActors(actors);
     if (actors.length < 2) actors = this._defaultActors(tokens);
     actors = this._ensureSequenceLanes(actors, tokens);
     const topY = Math.min(...actors.map((actor) => actor.y));
@@ -292,6 +543,7 @@ const FlowImage = {
       ).filter((step) => !this._isActorEcho(step.label, actors));
     }
     this._polishKnownLabels(steps, tokens, actors);
+    this._healSequence(steps, tokens, actors);
     if (!steps.length) {
       return { ok: false, errors: [`Found actors but no steps. Read: ${snippet || "no labels"}`], model: null };
     }
@@ -358,6 +610,11 @@ const FlowImage = {
     if (gap < Math.max(7, last.h * 0.65)) return true;
     const pathish = /\/$|\.\.\.$/.test(last.text) || /^\//.test(token.text) || /\.\.\./.test(token.text);
     if (pathish && gap < Math.max(36, last.h * 2.4)) return true;
+    if (/\b(GET|POST|PUT|PATCH|DELETE)\b/i.test(last.text) && /^[./[]?(accounts|cards|accountholders)\b/i.test(token.text) && gap < 90) {
+      return true;
+    }
+    if (/account-manag/i.test(last.text) && /cards|accounts/i.test(token.text) && gap < 90) return true;
+    if (/provider\/?$/i.test(last.text) && /kyc/i.test(token.text)) return true;
     const fieldish = /:$/.test(last.text) || /^</.test(token.text) || /^:\s*/.test(token.text);
     if (fieldish && gap < Math.max(28, last.h * 2)) return true;
     const idish = /^id\b/i.test(last.text) && /(holder|card|id|<)/i.test(token.text);
@@ -371,7 +628,13 @@ const FlowImage = {
   },
 
   _titleOf(rows, hint, steps) {
-    const firstAction = (steps || []).find((step) => /issue|create|card|account|onboard/i.test(step.label) && !this._isFieldLine(step.label));
+    const firstAction = (steps || []).find(
+      (step) =>
+        step.type === "process" &&
+        !/^create\b/i.test(step.label) &&
+        (this._isStartProcess(step.label) || (step.from && step.to && step.from !== step.to)) &&
+        !this._isFieldLine(step.label)
+    );
     const fromStep = firstAction ? firstAction.label : "";
     if (fromStep) return fromStep.slice(0, 80);
     const top = rows[0];
@@ -518,7 +781,9 @@ const FlowImage = {
     if (!value || value.length < 2 || value.length > 48) return false;
     if (!/[A-Za-z]{3,}/.test(value) && !/^(eps|pps)$/i.test(value)) return false;
     if (this._isProtocol(value) || this._isFieldLine(value) || this._isStatusLine(value)) return false;
-    if (this._looksLikeStep(value) || this._isChromeLabel(value)) return false;
+    if (this._looksLikeStep(value) || this._isChromeLabel(value) || this._isActionName(value)) return false;
+    if (/\b(kyc|kyb|ekyc)\b/i.test(value)) return false;
+    if (/\bprocess\b/i.test(value) && !/\bbusiness\b/i.test(value)) return false;
     if (value.includes("/") && !/darwin|chopin/i.test(value)) return false;
     if (this._isSkip(value) && !/^(client|platform)$/i.test(value)) return false;
     return /^(?:[A-Za-z][\w .()-]{0,40}|\(?\s*(?:DARWIN|CHOPIN|EPS|PPS)\s*\)?)$/i.test(value);
@@ -526,7 +791,7 @@ const FlowImage = {
 
   _headerCutoff(tokens) {
     const firstStep = [...tokens]
-      .filter((token) => this._looksLikeStep(token.text) || /issue card|kyc process|card issued/i.test(token.text))
+      .filter((token) => this._looksLikeStep(token.text) || this._isActionName(token.text))
       .sort((a, b) => a.cy - b.cy)[0];
     if (firstStep) return firstStep.cy - 8;
     const minY = Math.min(...tokens.map((token) => token.cy));
@@ -598,16 +863,39 @@ const FlowImage = {
     return this._uniqueActors(this._repairActors(found, tokens));
   },
 
+  _rejectStepActors(actors) {
+    return (actors || []).filter((actor) => !this._looksLikeStep(actor.name) && !this._isActionName(actor.name));
+  },
+
+  _isActionName(text) {
+    const value = String(text || "").trim();
+    return /^(sign\s*up|onboard|create|update|delete|issue|send|apply|enrol|enroll|register|activate|spend|set)\b/i.test(
+      value
+    );
+  },
+
+  _isStartProcess(caption) {
+    return /^(sign\s*up|issue|onboard|request|apply|enrol|enroll|register|open|start)\b/i.test(
+      this._cleanCaption(caption)
+    );
+  },
+
   _ensureSequenceLanes(actors, tokens) {
     const hay = (tokens || []).map((token) => token.text).join(" ");
-    const sequence = /\b(GET|POST|PUT|PATCH|DELETE)\b/i.test(hay) && /\b(201|status|eps|pps|darwin)\b/i.test(hay);
-    if (!sequence) return actors;
-    const names = (actors || []).map((actor) => actor.name.toLowerCase());
+    const known = this._actorsFromKnownNames(tokens);
+    const real = this._rejectStepActors(actors);
+    if (known.length >= 3) return known;
+    const names = (real || []).map((actor) => actor.name.toLowerCase());
     const hasBusiness = names.some((name) => /business/.test(name));
     const hasClient = names.some((name) => /client/.test(name));
     const hasEps = names.some((name) => /eps|darwin|pps/.test(name));
-    if (hasBusiness && hasClient && hasEps) return actors;
-    return this._threeLaneActors(tokens);
+    if (hasBusiness && hasClient && hasEps) return real;
+    const sequence =
+      /\b(GET|POST|PUT|PATCH|DELETE)\b/i.test(hay) &&
+      /\b(business|client|cent|eps|pps|darwin|accountholder|identity-management|spend)\b/i.test(hay);
+    if (sequence && known.length >= 2) return this._threeLaneActors(tokens);
+    if (sequence && real.length < 2) return this._threeLaneActors(tokens);
+    return real.length >= 2 ? real : actors;
   },
 
   _threeLaneActors(tokens) {
@@ -636,13 +924,6 @@ const FlowImage = {
   },
 
   _polishKnownLabels(steps, tokens, actors) {
-    const hay = (tokens || []).map((token) => token.text).join(" ");
-    const addField = (step, field) => {
-      if (!step) return;
-      step.fields = Array.isArray(step.fields) ? step.fields : [];
-      if (step.fields.some((item) => item.name === field.name)) return;
-      step.fields.push(field);
-    };
     const actorId = (re, fallback) => {
       const hit = (actors || []).find((actor) => re.test(actor.name) || re.test(actor.id));
       return hit ? hit.id : fallback;
@@ -661,33 +942,26 @@ const FlowImage = {
         step.to = eps;
         continue;
       }
-      if (/card issued/i.test(step.label)) {
-        step.label = "Card Issued";
+      if (this._isReturnProcess(step.label)) {
         step.from = actorId(/client/i, step.from);
         step.to = actorId(/business/i, step.to);
       }
       if (/account holder/i.test(step.label) && !/^create/i.test(step.label)) step.label = "Create Account Holder";
-      if (/^kyc process$/i.test(step.label)) step.label = "eKYC provider / KYC process";
-      if (step.type === "request") this._repairRequestPath(step);
-    }
-    const requests = (steps || []).filter((step) => step.type === "request");
-    requests.forEach((step) => {
-      if (/\/cards\b/i.test(step.path || "") && /card_prof|card profile|card_profile/i.test(hay)) {
-        addField(step, { name: "card_profile_id", in: "body", required: true, type: "", example: "<card profile>" });
+      if (/organis/i.test(step.label) && !/^create/i.test(step.label) && !/type:/i.test(step.label)) {
+        step.label = "Create Organisation";
       }
-    });
-    const responses = (steps || []).filter((step) => step.type === "response");
-    if (responses[0] && /accountholder id|ountholder id|id:\s*<ac/i.test(hay)) {
-      addField(responses[0], { name: "id", in: "response", required: true, type: "", example: "<accountholder id>", side: "response" });
-    }
-    if (responses[responses.length - 1] && /card id|id:\s*<card/i.test(hay)) {
-      addField(responses[responses.length - 1], { name: "id", in: "response", required: true, type: "", example: "<card id>", side: "response" });
+      if (/spend\s*polic/i.test(step.label) && !/^create/i.test(step.label)) step.label = "Create Spend Policy";
+      if (/kyb process/i.test(step.label) && !/provider/i.test(step.label)) step.label = "eKYB provider / KYB process";
+      if (/kyc process/i.test(step.label) && !/provider/i.test(step.label)) step.label = "eKYC provider / KYC process";
+      if (step.type === "request") this._repairRequestPath(step);
     }
   },
 
   _repairRequestPath(step) {
     const own = `${step.path || ""} ${step.label || ""} ${(step.fields || []).map((field) => field.name).join(" ")}`;
     let path = step.path || "";
+    const garbage = !path || path.length < 12 || /__|mat$|Jaccount|\[cards|account-ma$/i.test(path);
+    if (!garbage && /\/[A-Za-z].+\//.test(path)) return;
     if (/identity-management|accountholders/i.test(own) && !/\/accounts\b|\/cards\b|account_profile|card_profile/i.test(own)) {
       path = "/identity-management/.../accountholders";
     } else if (/card_profile|expiry_date|\/cards\b/i.test(own)) {
@@ -699,6 +973,90 @@ const FlowImage = {
       step.path = path;
       step.label = `${step.method || "POST"} ${path}`;
     }
+  },
+
+  _normalizeTokenText(text) {
+    return String(text || "")
+      .replace(/\s+/g, " ")
+      .replace(/\bhitp\b/gi, "http")
+      .replace(/\bPPS\b/g, "EPS")
+      .replace(/\b(Cent|Clent|Cient)\b/g, "Client")
+      .replace(/\bountholder\b/gi, "accountholder")
+      .replace(/\bsernal\b/gi, "serial")
+      .replace(/account-mat(?:agement)?/gi, "account-management")
+      .replace(/identity-manag(?:ement)?/gi, "identity-management")
+      .replace(/\{\s*(\d+)\s*\]/g, "[$1]")
+      .replace(/\[\s*(\d+)\s*\}/g, "[$1]")
+      .replace(/parent_account\s+account_no/gi, "parent_account.account_no")
+      .replace(/onboarded_products\[[^\]]+\]\s+status/gi, (match) => match.replace(/\s+status/i, ".status"))
+      .replace(/^\.?Jaccounts\b/i, "/accounts")
+      .replace(/^\[cards\b/i, "/cards")
+      .replace(/^[=m\s—\-_|[\]]+(?=card issued)/i, "")
+      .replace(/\bekyb\b/gi, "eKYB")
+      .trim();
+  },
+
+  _healSequence(steps, tokens, actors) {
+    if (!Array.isArray(steps)) return;
+    this._dropNoiseSteps(steps);
+    this._insertMissingCreates(steps, tokens);
+  },
+
+  _dropNoiseSteps(steps) {
+    const noise = /^(oa|de|eview|preview|mmm|eee|post|account)$/i;
+    for (let i = steps.length - 1; i >= 0; i -= 1) {
+      const step = steps[i];
+      if (step.type === "process" && (noise.test(step.label) || String(step.label || "").length <= 2)) {
+        steps.splice(i, 1);
+        continue;
+      }
+      if (step.type === "request" && !step.path && !this._methodOf(step.label)) steps.splice(i, 1);
+    }
+  },
+
+  _insertMissingCreates(steps, tokens) {
+    const creates = (tokens || [])
+      .map((token) => this._cleanCaption(token.text))
+      .filter((text) => /^create\b/i.test(text) && text.split(/\s+/).length <= 6);
+    const out = [];
+    steps.forEach((step, index) => {
+      out.push(step);
+      if (step.type !== "request") return;
+      const next = steps[index + 1];
+      if (next && next.type === "process" && next.from === step.to && next.to === step.to) return;
+      const used = new Set(out.filter((item) => item.type === "process").map((item) => String(item.label || "").toLowerCase()));
+      const fromTokens = creates.find((label) => !used.has(label.toLowerCase()) && this._createMatchesRequest(label, step));
+      const label = fromTokens || this._createLabelFromPath(step.path || step.label, step);
+      if (!label) return;
+      out.push({
+        id: `do-${FlowParse._slug(label)}-${out.length}`,
+        type: "process",
+        label,
+        from: step.to,
+        to: step.to,
+      });
+    });
+    steps.splice(0, steps.length, ...out);
+  },
+
+  _createMatchesRequest(label, step) {
+    const hay = `${step.path || ""} ${step.label || ""} ${(step.fields || []).map((field) => `${field.name} ${field.example || ""}`).join(" ")}`;
+    if (/organis/i.test(label)) return /accountholder|identity|organis/i.test(hay);
+    if (/account holder/i.test(label)) return /accountholder|identity/i.test(hay);
+    if (/spend|polic/i.test(label)) return /spend|polic/i.test(hay);
+    if (/\bcard\b/i.test(label)) return /card/i.test(hay);
+    if (/\baccount\b/i.test(label)) return /account/i.test(hay);
+    return true;
+  },
+
+  _createLabelFromPath(path, step) {
+    const hay = `${path || ""} ${step?.label || ""} ${(step?.fields || []).map((field) => `${field.name} ${field.example || ""}`).join(" ")}`;
+    if (/spend|polic/i.test(hay)) return "Create Spend Policy";
+    if (/organis/i.test(hay)) return "Create Organisation";
+    if (/accountholders|identity-management/i.test(hay)) return "Create Account Holder";
+    if (/\/cards\b|card_profile/i.test(hay)) return "Create Card";
+    if (/\/accounts\b|account-management/i.test(hay)) return "Create Account";
+    return "";
   },
 
   _median(values) {
@@ -920,6 +1278,13 @@ const FlowImage = {
       step.to = lastReq.from;
       return;
     }
+    if (step.type === "process" && this._isStartProcess(step.label) && actors[0] && actors[1]) {
+      if (step.from === step.to) {
+        step.from = actors[0].id;
+        step.to = actors[1].id;
+      }
+      return;
+    }
     if (step.from !== step.to) return;
     const index = actors.findIndex((actor) => actor.id === step.from);
     if (index < 0) return;
@@ -936,7 +1301,11 @@ const FlowImage = {
 
   _isReturnProcess(caption) {
     const text = this._cleanCaption(caption);
-    return /card issued/i.test(text) || /^(issued|complete|completed|done|success|returned)\b/i.test(text);
+    if (/^create\b/i.test(text)) return false;
+    return (
+      /card issued|onboarded|issued$|complete|completed|done|success|returned|created$/i.test(text) ||
+      /^(issued|complete|completed|done|success|returned)\b/i.test(text)
+    );
   },
 
   _captionOf(lines, method, status) {
@@ -951,9 +1320,9 @@ const FlowImage = {
 
   _cleanCaption(text) {
     return String(text || "")
-      .replace(/^[\[|—~\-_`'‘]+/, "")
+      .replace(/^[\[|—~\-_`'‘=m\s]+/, "")
       .replace(/^[e]{2,}\s+(?=card issued)/i, "")
-      .replace(/[~—_|`‘]+$/g, "")
+      .replace(/[=m\s—_|`‘\]]+$/g, "")
       .replace(/\s+/g, " ")
       .trim();
   },
@@ -1026,9 +1395,11 @@ const FlowImage = {
       .replace(/_$/g, "")
       .trim();
     if (/^ount_profile_id$/i.test(text)) return "account_profile_id";
+    if (/account_profile/i.test(text) && /id$/i.test(text)) return "account_profile_id";
+    if (/card_profile/i.test(text) && /id$/i.test(text)) return "card_profile_id";
     if (/^expiry_date$/i.test(text) || /^expiry_date$/i.test(text.replace(/\s/g, "_"))) return "expiry_date";
-    if (/onboarded_products\[[^\]]+\]_?status/i.test(text)) return text.replace(/_?status$/i, ".status");
-    if (/^parent_account_account_no$/i.test(text)) return "parent_account.account_no";
+    if (/onboarded_products\[[^\]]+\]_?\.?status/i.test(text)) return text.replace(/_?status$/i, ".status").replace("..", ".");
+    if (/^parent_account[._]account_no$/i.test(text)) return "parent_account.account_no";
     return text;
   },
 
@@ -1113,7 +1484,7 @@ const FlowImage = {
     const text = String(caption || "").trim();
     if (method || status || this._isStatusLine(text)) return false;
     if (this._isChromeLabel(text) || this._isFieldLine(text)) return true;
-    if (/^(header|path|query|body|type|status|object|enum|string|preview|eview|de|http|card id|ountholder id|e_id|card_prof)$/i.test(text)) return true;
+    if (/^(header|path|query|body|type|status|object|enum|string|preview|eview|de|http|card id|ountholder id|e_id|card_prof|oa)$/i.test(text)) return true;
     if (text.length <= 2) return true;
     if (/^[a-z]{1,3}_[a-z]{1,3}$/i.test(text)) return true;
     if (/^[A-Fa-f0-9.]{10,}$/.test(text)) return true;
@@ -1127,7 +1498,9 @@ const FlowImage = {
       /^(GET|POST|PUT|PATCH|DELETE|SOAP)\b/i.test(value) ||
       /^[1-5]\d{2}\b/.test(value) ||
       this._isStatusLine(value) ||
-      /^(issue|create|update|delete|send|card issued|ekyc)\b/i.test(value) ||
+      /^(issue|create|update|delete|send|card issued|e?ky[cb]|sign\s*up|onboard|apply|enrol|enroll|register|activate|spend)\b/i.test(
+        value
+      ) ||
       /\?$/.test(value) ||
       this._isFieldLine(value)
     );

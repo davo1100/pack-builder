@@ -239,6 +239,7 @@
           <div class="tool-group tool-context" id="diagram-tools" hidden>
             <span class="toolbar-label">Diagram</span>
             <button type="button" id="btn-edit-diagram">Edit diagram</button>
+            <button type="button" id="btn-convert-diagram-flow" hidden>Convert to API flow</button>
           </div>
           <div class="tool-group tool-context" id="flow-tools" hidden>
             <span class="toolbar-label">API flow</span>
@@ -267,6 +268,7 @@
             </div>
             <input id="image-alt-edit" type="text" placeholder="Alt text" maxlength="160">
             <button type="button" id="btn-replace-image">Replace</button>
+            <button type="button" id="btn-convert-image-flow" hidden>Convert to API flow</button>
           </div>
           <div class="tool-group tool-context" id="hero-tones" hidden>
             <span class="toolbar-label">Header colour</span>
@@ -464,10 +466,10 @@
           </details>
           <details class="flow-import" id="flow-wsdl-box">
             <summary>Chopin WSDL</summary>
-            <textarea id="flow-wsdl" spellcheck="false" placeholder="Paste a Chopin SOAP WSDL, or upload one or more .wsdl files"></textarea>
+            <textarea id="flow-wsdl" spellcheck="false" placeholder="Paste a Chopin SOAP WSDL, XML schema, or SoapUI project, or upload .wsdl / .xml files"></textarea>
             <div class="flow-import-actions">
               <input id="flow-wsdl-file" type="file" multiple accept=".wsdl,.xml,text/xml,application/xml">
-              <button type="button" id="flow-import-wsdl">Read WSDL</button>
+              <button type="button" id="flow-import-wsdl">Read WSDL or XML</button>
               <button type="button" id="flow-wsdl-clear" hidden>Clear specs</button>
             </div>
             <p id="flow-wsdl-files" class="flow-filter-note"></p>
@@ -524,13 +526,13 @@
 
   <script src="js/icons.js"></script>
   <script src="js/syntax.js"></script>
-  <script src="js/editor.js"></script>
+  <script src="js/editor.js?v=seq-import15"></script>
   <script src="js/diagram.js"></script>
-  <script src="js/flow-ir.js"></script>
-  <script src="js/flow-parse.js"></script>
-  <script src="js/flow-image.js?v=seq-import6"></script>
-  <script src="js/flow-render.js"></script>
-  <script src="js/flow-studio.js"></script>
-  <script src="js/studio.js"></script>
+  <script src="js/flow-ir.js?v=seq-import15"></script>
+  <script src="js/flow-parse.js?v=wsdl-xml3"></script>
+  <script src="js/flow-image.js?v=seq-import15"></script>
+  <script src="js/flow-render.js?v=seq-import15"></script>
+  <script src="js/flow-studio.js?v=wsdl-xml3"></script>
+  <script src="js/studio.js?v=seq-import15"></script>
 </body>
 </html>
