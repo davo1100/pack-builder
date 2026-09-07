@@ -248,15 +248,12 @@ const FlowStudio = {
     this._previewId = this._previewId || FlowRender.uid("pf");
     const id = this._previewId;
     const preferred = FlowIR.audienceOf(this.model?.presentation?.audience);
-    const radios = FlowIR.VIEWERS.map(
-      (view) =>
-        `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${view.key === preferred ? " checked" : ""}>`
-    ).join("");
-    const tabs = `<div class="pack-flow-tabs" role="tablist">${FlowIR.VIEWERS.map(
-      (view) => `<label class="pack-flow-tab" for="${id}-${view.key}">${this._esc(view.label)}</label>`
-    ).join("")}</div>`;
+    const tabs = `<div class="pack-flow-tabs" role="tablist">${FlowIR.VIEWERS.map((view) => {
+      const checked = view.key === preferred ? " checked" : "";
+      return `<label class="pack-flow-tab"><input class="pack-flow-radio" type="radio" name="${id}" value="${view.key}"${checked}>${this._esc(view.label)}</label>`;
+    }).join("")}</div>`;
     const panels = FlowIR.VIEWERS.map((view) => `<div class="pack-flow-panel" data-view="${view.key}"></div>`).join("");
-    host.innerHTML = `<div class="pack-flow">${radios}${tabs}${panels}</div>`;
+    host.innerHTML = `<div class="pack-flow">${tabs}${panels}</div>`;
     return host;
   },
 

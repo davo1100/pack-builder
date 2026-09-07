@@ -1918,6 +1918,7 @@ h2.section:first-child {
 
 .flow-preview .pack-flow-tab {
   display: inline-block;
+  position: relative;
   font: 700 11px Arial, sans-serif;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1929,6 +1930,7 @@ h2.section:first-child {
   cursor: pointer;
 }
 
+.flow-preview .pack-flow-tab:has(:checked),
 .flow-preview .pack-flow:has(.pack-flow-radio[value="process"]:checked) .pack-flow-tab[for$="-process"],
 .flow-preview .pack-flow:has(.pack-flow-radio[value="ops"]:checked) .pack-flow-tab[for$="-ops"],
 .flow-preview .pack-flow:has(.pack-flow-radio[value="developer"]:checked) .pack-flow-tab[for$="-developer"] {

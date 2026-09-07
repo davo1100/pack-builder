@@ -560,6 +560,14 @@ def prefix_ids(html: str, prefix: str) -> str:
 
     html = re.sub(r'(?<![\w-])id="([^"]+)"', id_sub, html)
     html = re.sub(r'href="#([^"]+)"', href_sub, html)
+
+    def for_sub(m: re.Match) -> str:
+        value = m.group(1)
+        if value.startswith(prefix + "-") or is_cross_chapter(value):
+            return m.group(0)
+        return f'for="{prefix}-{value}"'
+
+    html = re.sub(r'(?<![\w-])for="([^"]+)"', for_sub, html)
     for orig in original_ids:
         if orig.startswith(prefix + "-") or is_cross_chapter(orig):
             continue

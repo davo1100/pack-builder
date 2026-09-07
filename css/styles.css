@@ -671,6 +671,7 @@ li {
 
 .pack-flow-tab {
   display: inline-block;
+  position: relative;
   font: 700 11px Arial, sans-serif;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -682,6 +683,7 @@ li {
   cursor: pointer;
 }
 
+.pack-flow-tab:has(:checked),
 .pack-flow:has(.pack-flow-radio[value="process"]:checked) .pack-flow-tab[for$="-process"],
 .pack-flow:has(.pack-flow-radio[value="ops"]:checked) .pack-flow-tab[for$="-ops"],
 .pack-flow:has(.pack-flow-radio[value="developer"]:checked) .pack-flow-tab[for$="-developer"] {

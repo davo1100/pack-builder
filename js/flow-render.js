@@ -97,16 +97,16 @@ const FlowRender = {
     const json = options?.embed === false ? "" : this.attr(JSON.stringify(source));
     const id = this.uid("pf");
     const preferred = FlowIR.audienceOf(source.presentation?.audience);
-    const radios = views
-      .map((view) => `<input class="pack-flow-radio" type="radio" name="${id}" id="${id}-${view.key}" value="${view.key}"${view.key === preferred ? " checked" : ""}>`)
-      .join("");
     const tabs = `<div class="pack-flow-tabs" role="tablist">${views
-      .map((view) => `<label class="pack-flow-tab" for="${id}-${view.key}">${this.escape(view.label)}</label>`)
+      .map((view) => {
+        const checked = view.key === preferred ? " checked" : "";
+        return `<label class="pack-flow-tab"><input class="pack-flow-radio" type="radio" name="${id}" value="${view.key}"${checked}>${this.escape(view.label)}</label>`;
+      })
       .join("")}</div>`;
     const panels = views
       .map((view) => `<div class="pack-flow-panel" data-view="${view.key}">${view.svg}</div>`)
       .join("");
-    return { ok: true, errors, html: `<div class="pack-flow"${json ? ` data-flow="${json}"` : ""}>${radios}${tabs}${panels}</div>` };
+    return { ok: true, errors, html: `<div class="pack-flow"${json ? ` data-flow="${json}"` : ""}>${tabs}${panels}</div>` };
   },
 
   parseEmbed(el) {
