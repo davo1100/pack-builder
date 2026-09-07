@@ -1485,7 +1485,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     elif chapters:
         overview_section = ""
 
-    return f"""<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -1518,9 +1518,11 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
       {"".join(chapter_html)}
     </main>
   </div>
-</body>
-</html>
 """
+    zoom_js = load_pack_zoom_js()
+    if zoom_js:
+        html += "  <script>\n" + zoom_js + "\n  </script>\n"
+    return html + "</body>\n</html>\n"
 
 
 THEME_VARS = {
@@ -1639,3 +1641,11 @@ def build_from_payload(data: dict, css: str | None = None) -> str:
 
 def load_client_css() -> str:
     return (ROOT / "css" / "styles.css").read_text(encoding="utf-8")
+
+
+def load_pack_zoom_js() -> str:
+    path = ROOT / "js" / "pack-zoom.js"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
