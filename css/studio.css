@@ -402,6 +402,23 @@ h2.section:first-child {
   resize: vertical;
 }
 
+.favicon-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.favicon-preview {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+}
+
 .field select {
   width: 100%;
   font: inherit;

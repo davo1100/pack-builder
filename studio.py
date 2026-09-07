@@ -150,9 +150,14 @@ class StudioHandler(SimpleHTTPRequestHandler):
                     docs.extend(_doc_to_payload(doc) for doc in batch)
                     if pack_settings:
                         settings = pack_settings
+                models = docs_from_payload({"docs": docs})
+                overview, created = sync_overview(models, settings_from_payload({"settings": settings or {}}))
+                if created:
+                    models.insert(0, overview)
+                docs = [_doc_to_payload(doc) for doc in models]
             except Exception as exc:
                 return self._send_json({"error": str(exc)}, 400)
-            payload = {"docs": docs}
+            payload = {"docs": docs, "overview_synced": True}
             if settings:
                 payload["settings"] = settings
             return self._send_json(payload)

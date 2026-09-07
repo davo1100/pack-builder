@@ -81,6 +81,7 @@ class Settings:
     header_doc: str = "Technical documentation"
     logo_url: str = "https://eps.edenred.com/hubfs/EPS-Red.svg"
     logo_alt: str = "Edenred Payment Solutions"
+    favicon_url: str = ""
     confidential: bool = True
     footer: str = (
         "Edenred Payment Solutions &bull; Technical documentation "
@@ -740,6 +741,49 @@ def _attr(html: str, name: str) -> str:
     return html_lib.unescape(match.group(1)) if match else ""
 
 
+def _favicon_from_html(html: str) -> str:
+    for match in re.finditer(r"<link\b([^>]+)/?>", html, re.I):
+        attrs = match.group(1)
+        rel = {part.lower() for part in re.split(r"\s+", _attr(attrs, "rel")) if part}
+        if "icon" not in rel and "shortcut" not in rel:
+            continue
+        href = _attr(attrs, "href")
+        if href:
+            return href
+    return ""
+
+
+def _safe_icon_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or len(text) > 1_500_000:
+        return ""
+    lower = text.lower()
+    if lower.startswith(("javascript:", "vbscript:", "data:text")):
+        return ""
+    if lower.startswith(("https://", "http://")):
+        return text
+    if lower.startswith("data:image/") and ";base64," in lower:
+        return text
+    return ""
+
+
+def _favicon_type_attr(url: str) -> str:
+    lower = str(url or "").lower()
+    if "image/svg" in lower or lower.endswith(".svg"):
+        return ' type="image/svg+xml"'
+    if "image/png" in lower or lower.endswith(".png"):
+        return ' type="image/png"'
+    if "image/webp" in lower or lower.endswith(".webp"):
+        return ' type="image/webp"'
+    if "image/gif" in lower or lower.endswith(".gif"):
+        return ' type="image/gif"'
+    if "image/jpeg" in lower or lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        return ' type="image/jpeg"'
+    if "x-icon" in lower or "vnd.microsoft.icon" in lower or lower.endswith(".ico"):
+        return ' type="image/x-icon"'
+    return ""
+
+
 def _inner_text(html: str, pattern: str) -> str:
     match = re.search(pattern, html, re.I)
     return strip_tags(match.group(1)) if match else ""
@@ -774,6 +818,7 @@ def settings_from_pack(html: str, filename: str = "documentation.html") -> dict:
         or Settings.header_doc,
         "logo_url": logo_src or Settings.logo_url,
         "logo_alt": logo_alt or Settings.logo_alt,
+        "favicon_url": _favicon_from_html(html),
         "confidential": bool(re.search(r'class="confidential"', html)),
         "footer": _inner_text(html, r'<p class="site-footer">([\s\S]*?)</p>')
         or Settings.footer,
@@ -1417,6 +1462,11 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     header_doc = html_lib.escape(settings.header_doc)
     logo_url = html_lib.escape(settings.logo_url, quote=True)
     logo_alt = html_lib.escape(settings.logo_alt, quote=True)
+    icon_url = _safe_icon_url(settings.favicon_url) or _safe_icon_url(settings.logo_url)
+    icon_link = ""
+    if icon_url:
+        icon_href = html_lib.escape(icon_url, quote=True)
+        icon_link = f'  <link rel="icon"{_favicon_type_attr(icon_url)} href="{icon_href}">\n'
 
     overview_section = ""
     if overview:
@@ -1433,7 +1483,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{page_title}</title>
-  <style>
+{icon_link}  <style>
 {themed_css}
 
 {extra_css}
@@ -1532,11 +1582,15 @@ def settings_from_payload(data: dict) -> Settings:
         "header_doc",
         "logo_url",
         "logo_alt",
+        "favicon_url",
         "footer",
         "output_filename",
     ):
         if key in raw and isinstance(raw[key], str):
-            setattr(settings, key, raw[key])
+            value = raw[key]
+            if key == "favicon_url":
+                value = _safe_icon_url(value)
+            setattr(settings, key, value)
     if "confidential" in raw:
         settings.confidential = bool(raw["confidential"])
     theme = raw.get("theme")

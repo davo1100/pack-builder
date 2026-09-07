@@ -6,6 +6,7 @@ const state = {
   clientCss: "",
   previewTimer: null,
   previewUrl: "",
+  useImportedPreview: false,
 };
 
 const els = {
@@ -28,6 +29,10 @@ const els = {
   headerDoc: document.getElementById("header-doc"),
   logoUrl: document.getElementById("logo-url"),
   logoAlt: document.getElementById("logo-alt"),
+  faviconUrl: document.getElementById("favicon-url"),
+  faviconFile: document.getElementById("favicon-file"),
+  faviconChoose: document.getElementById("favicon-choose"),
+  faviconPreview: document.getElementById("favicon-preview"),
   confidential: document.getElementById("confidential"),
   footer: document.getElementById("footer"),
   outputFilename: document.getElementById("output-filename"),
@@ -133,13 +138,14 @@ function toColorInput(value) {
 
 function applyIncomingSettings(settings) {
   if (!settings || typeof settings !== "object") return;
-  if (settings.page_title) els.pageTitle.value = settings.page_title;
-  if (settings.header_doc) els.headerDoc.value = settings.header_doc;
-  if (settings.logo_url) els.logoUrl.value = settings.logo_url;
-  if (settings.logo_alt) els.logoAlt.value = settings.logo_alt;
-  if ("confidential" in settings) els.confidential.checked = Boolean(settings.confidential);
-  if (settings.footer) els.footer.value = settings.footer;
-  if (settings.output_filename) els.outputFilename.value = settings.output_filename;
+  if (settings.page_title && els.pageTitle) els.pageTitle.value = settings.page_title;
+  if (settings.header_doc && els.headerDoc) els.headerDoc.value = settings.header_doc;
+  if (settings.logo_url && els.logoUrl) els.logoUrl.value = settings.logo_url;
+  if (settings.logo_alt && els.logoAlt) els.logoAlt.value = settings.logo_alt;
+  if ("favicon_url" in settings && els.faviconUrl) els.faviconUrl.value = settings.favicon_url || "";
+  if ("confidential" in settings && els.confidential) els.confidential.checked = Boolean(settings.confidential);
+  if (settings.footer && els.footer) els.footer.value = settings.footer;
+  if (settings.output_filename && els.outputFilename) els.outputFilename.value = settings.output_filename;
   const theme = settings.theme || {};
   const colors = {
     magenta: "theme-magenta",
@@ -166,6 +172,7 @@ function applyIncomingSettings(settings) {
     document.getElementById("theme-radius").value = String(theme.radius).replace(/px$/i, "");
   }
   PackEditor.applyTheme(themeOverrideCss());
+  syncFaviconPreview();
 }
 
 function settingsPayload() {
@@ -174,11 +181,72 @@ function settingsPayload() {
     header_doc: els.headerDoc.value.trim(),
     logo_url: els.logoUrl.value.trim(),
     logo_alt: els.logoAlt.value.trim(),
+    favicon_url: els.faviconUrl?.value.trim() || "",
     confidential: els.confidential.checked,
     footer: els.footer.value,
     output_filename: els.outputFilename.value.trim() || "documentation.html",
     theme: themePayload(),
   };
+}
+
+const FAVICON_MAX_BYTES = 512 * 1024;
+
+function isFaviconFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  return (
+    /\.(ico|png|svg|gif|webp|jpe?g)$/i.test(name) ||
+    type.includes("icon") ||
+    ["image/png", "image/svg+xml", "image/gif", "image/webp", "image/jpeg", "image/x-icon"].includes(type)
+  );
+}
+
+function faviconDataUrl(file, dataUrl) {
+  const value = String(dataUrl || "");
+  if (/^data:image\//i.test(value)) return value;
+  const raw = value.split(",")[1];
+  if (!raw) return value;
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  if (name.endsWith(".ico") || type.includes("icon")) return `data:image/x-icon;base64,${raw}`;
+  if (name.endsWith(".svg") || type === "image/svg+xml") return `data:image/svg+xml;base64,${raw}`;
+  if (name.endsWith(".png") || type === "image/png") return `data:image/png;base64,${raw}`;
+  if (name.endsWith(".webp") || type === "image/webp") return `data:image/webp;base64,${raw}`;
+  if (/\.jpe?g$/i.test(name) || type === "image/jpeg") return `data:image/jpeg;base64,${raw}`;
+  if (name.endsWith(".gif") || type === "image/gif") return `data:image/gif;base64,${raw}`;
+  return value;
+}
+
+function syncFaviconPreview() {
+  const preview = els.faviconPreview;
+  if (!preview) return;
+  const src = els.faviconUrl?.value.trim() || els.logoUrl?.value.trim() || "";
+  if (!src || /^(javascript:|vbscript:|data:text)/i.test(src)) {
+    preview.hidden = true;
+    preview.removeAttribute("src");
+    return;
+  }
+  preview.src = src;
+  preview.hidden = false;
+}
+
+function readFaviconFile(file) {
+  if (!isFaviconFile(file)) {
+    setStatus("Use an .ico, .png, .svg, .gif, or .webp icon", "error");
+    return;
+  }
+  if (file.size > FAVICON_MAX_BYTES) {
+    setStatus("Tab icons must be 512 KB or smaller", "error");
+    return;
+  }
+  readAsDataURL(file)
+    .then((dataUrl) => {
+      els.faviconUrl.value = faviconDataUrl(file, dataUrl);
+      syncFaviconPreview();
+      schedulePreview();
+      setStatus("Browser tab icon updated", "ok");
+    })
+    .catch(() => setStatus("Could not read that icon", "error"));
 }
 
 function buildPayload() {
@@ -233,7 +301,7 @@ function renumberChapters() {
   }
 }
 
-function mergeIncoming(docs) {
+function mergeIncoming(docs, options = {}) {
   flushEditor();
   let lastId = null;
   for (const incoming of docs) {
@@ -262,24 +330,29 @@ function mergeIncoming(docs) {
   }
   if (lastId) state.selected = lastId;
   else if (!state.selected && state.docs.length) state.selected = state.docs[0].id;
-  return syncOverview({ skipFlush: true }).then(() => {
-    renderList();
-    if (state.tab === "edit") loadEditor();
-    if (state.tab === "preview") revealPreviewSelection();
-    schedulePreview();
-    els.btnDownload.disabled = !state.docs.some((d) => d.include);
-  });
+  pinOverviews();
+  renderList();
+  els.btnDownload.disabled = !state.docs.some((d) => d.include);
+  if (state.tab === "edit") loadEditor();
+  if (state.tab === "preview") revealPreviewSelection();
+  if (!options.skipPreview) schedulePreview();
+  if (options.skipOverview) return Promise.resolve();
+  return syncOverview({ skipFlush: true })
+    .then(() => {
+      renderList();
+      if (state.tab === "edit") loadEditor();
+      if (state.tab === "preview") revealPreviewSelection();
+      if (!options.skipPreview) schedulePreview();
+    })
+    .catch((err) => {
+      setStatus(err.message || "Pages loaded, but the contents page could not be updated", "error");
+    });
 }
 
 async function syncOverview(options) {
   if (!state.docs.length) return;
   if (!options?.skipFlush) flushEditor();
-  const res = await fetch("/api/sync-overview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  });
-  const data = await res.json();
+  const { res, data } = await postJson("/api/sync-overview", buildPayload());
   if (!res.ok) {
     setStatus(data.error || "Could not update contents page", "error");
     return;
@@ -546,8 +619,10 @@ async function filesFromDrop(dataTransfer) {
 }
 
 function imageKeys(file) {
-  const keys = [file.name];
-  const relative = String(file.webkitRelativePath || "").replace(/\\/g, "/");
+  const keys = [];
+  const name = String(file?.name || "").replaceAll("\\", "/");
+  if (name) keys.push(name, name.split("/").pop());
+  const relative = String(file?.webkitRelativePath || "").replaceAll("\\", "/");
   if (relative) {
     keys.push(relative);
     const attach = relative.split("/").reduce((found, part, index, parts) => {
@@ -567,47 +642,361 @@ function readAsBase64(file) {
   });
 }
 
+const API_TIMEOUT_MS = 25000;
+const HOSTED_TIMEOUT_MESSAGE =
+  "The hosted converter timed out. Drop a downloaded pack such as documentation.html to load it in the browser, or run Pack Builder locally.";
+
+async function readResponseJson(res) {
+  const text = await res.text();
+  if (!text) {
+    if (res.status === 413) throw new Error("Those files are too large for the hosted converter. Try fewer files, or run Pack Builder locally.");
+    if (res.status === 502 || res.status === 504 || res.status === 408) {
+      throw new Error(HOSTED_TIMEOUT_MESSAGE);
+    }
+    throw new Error(res.ok ? "The server sent an empty response" : `Could not convert files (${res.status})`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.status === 413) throw new Error("Those files are too large for the hosted converter. Try fewer files, or run Pack Builder locally.");
+    if (res.status === 502 || res.status === 504 || res.status === 408) {
+      throw new Error(HOSTED_TIMEOUT_MESSAGE);
+    }
+    throw new Error(res.ok ? "The server sent an unexpected response" : `Could not convert files (${res.status})`);
+  }
+}
+
+async function postJson(url, body, timeoutMs = API_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    return { res, data: await readResponseJson(res) };
+  } catch (err) {
+    if (err && (err.name === "AbortError" || err.name === "TimeoutError")) {
+      throw new Error(HOSTED_TIMEOUT_MESSAGE);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isBuiltPackHtml(html) {
+  const text = String(html || "");
+  if (!/class=["']site-header["']/.test(text)) return false;
+  return /<section\b[^>]*\bchapter\b/i.test(text);
+}
+
+function isPackReadyHtml(html) {
+  const text = String(html || "");
+  return (
+    text.includes('class="content-card"')
+    || text.includes("class='content-card'")
+    || text.includes('class="page-header"')
+    || text.includes('class="hero"')
+  );
+}
+
+function matchingTagEnd(html, start, tag) {
+  const open = `<${tag}`;
+  const close = `</${tag}>`;
+  const isOpen = (at) => {
+    if (html.slice(at, at + open.length).toLowerCase() !== open) return false;
+    const next = html[at + open.length] || "";
+    return " \t\r\n/>".includes(next);
+  };
+  let pos = start + open.length;
+  let depth = 1;
+  const lower = html.toLowerCase();
+  while (pos < html.length && depth) {
+    const nextOpen = (() => {
+      let needle = pos;
+      while (true) {
+        const at = lower.indexOf(open, needle);
+        if (at === -1) return -1;
+        if (isOpen(at)) return at;
+        needle = at + 1;
+      }
+    })();
+    const nextClose = lower.indexOf(close, pos);
+    if (nextClose === -1) return html.length;
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth += 1;
+      pos = nextOpen + open.length;
+    } else {
+      depth -= 1;
+      pos = nextClose + close.length;
+    }
+  }
+  return pos;
+}
+
+function attrFromTag(tag, name) {
+  const match = String(tag || "").match(new RegExp(`\\b${name}="([^"]*)"`, "i"));
+  return match ? decodeEntities(match[1]) : "";
+}
+
+function innerText(html, pattern) {
+  const match = String(html || "").match(pattern);
+  if (!match) return "";
+  return decodeEntities(match[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+}
+
+function settingsFromPackHtml(html, filename) {
+  const logo = String(html || "").match(/<a class="brand-lockup"[^>]*>\s*<img\b([^>]+)>/i);
+  const logoTag = logo ? logo[1] : "";
+  let favicon = "";
+  const links = String(html || "").matchAll(/<link\b([^>]+)>/gi);
+  for (const item of links) {
+    const rel = attrFromTag(item[1], "rel").toLowerCase();
+    if (!/\bicon\b/.test(rel) && !/\bshortcut\b/.test(rel)) continue;
+    favicon = attrFromTag(item[1], "href");
+    if (favicon) break;
+  }
+  return {
+    page_title: innerText(html, /<title>([\s\S]*?)<\/title>/i) || "",
+    header_doc: innerText(html, /<span class="header-doc">([\s\S]*?)<\/span>/i) || "",
+    logo_url: attrFromTag(logoTag, "src") || "",
+    logo_alt: attrFromTag(logoTag, "alt") || "",
+    favicon_url: favicon,
+    confidential: /class="confidential"/.test(html),
+    footer: innerText(html, /<p class="site-footer">([\s\S]*?)<\/p>/i) || "",
+    output_filename: String(filename || "documentation.html").split(/[\\/]/).pop(),
+  };
+}
+
+function cleanImportedBody(html) {
+  let body = String(html || "")
+    .replace(/\scontenteditable(?:=(["'][^"']*["']))?/gi, "")
+    .replace(/\sdata-layout-block(?:=(["'][^"']*["']))?/gi, "")
+    .replace(/\sdata-protected(?:=(["'][^"']*["']))?/gi, "")
+    .replace(/\sdata-plain(?:=(["'][^"']*["']))?/gi, "")
+    .replace(/\sdata-lock-label="[^"]*"/gi, "")
+    .replace(/<p class="site-footer">[\s\S]*?<\/p>/gi, "");
+  const navMark = "border:0;margin-top:28px;justify-content:space-between";
+  const pos = body.lastIndexOf(navMark);
+  if (pos !== -1) {
+    const start = body.lastIndexOf("<div", pos);
+    if (start !== -1) {
+      const end = matchingTagEnd(body, start, "div");
+      body = body.slice(0, start) + body.slice(end);
+    }
+  }
+  return body.trim();
+}
+
+function extractContainer(html) {
+  const text = String(html || "");
+  const marker = '<div class="container">';
+  const start = text.indexOf(marker);
+  if (start === -1) {
+    const body = text.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    let inner = body ? body[1] : text;
+    inner = inner.replace(/<nav[\s\S]*?<\/nav>/i, "");
+    inner = inner.replace(/<script[\s\S]*?<\/script>/gi, "");
+    inner = inner.replace(/<style[\s\S]*?<\/style>/gi, "");
+    return inner.trim();
+  }
+  const end = matchingTagEnd(text, start, "div");
+  let inner = text.slice(start + marker.length, end - "</div>".length);
+  const pf = inner.indexOf('<div class="page-footer-nav">');
+  if (pf !== -1) {
+    inner = inner.slice(0, pf) + inner.slice(matchingTagEnd(inner, pf, "div"));
+  }
+  return inner.replace(/<footer>[\s\S]*?<\/footer>/gi, "").trim();
+}
+
+function detectHtmlRole(filename, html) {
+  const base = String(filename || "").toLowerCase();
+  if (/^00[_-]/.test(base) || /index|hub|overview/.test(base)) return "overview";
+  const hasHero = html.includes('class="hero"');
+  const hasGrid = html.includes('class="grid"');
+  const hasToc = html.includes('class="toc-card"');
+  if (hasHero && hasGrid && !hasToc) return "overview";
+  return "chapter";
+}
+
+function detectHtmlTitle(html, filename) {
+  const match = String(html || "").match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (match) {
+    const title = decodeEntities(match[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    if (title) return title;
+  }
+  return String(filename || "Page")
+    .replace(/\.(html|htm)$/i, "")
+    .replace(/^\d+[_-]?/, "")
+    .replace(/_/g, " ")
+    .trim() || filename;
+}
+
+function detectHtmlNum(filename) {
+  const match = String(filename || "").match(/^(\d{1,2})(?=[._-])/);
+  return match ? match[1].padStart(2, "0") : "";
+}
+
+function docFromReadyHtml(html, filename) {
+  const body = cleanImportedBody(extractContainer(html));
+  const role = detectHtmlRole(filename, body || html);
+  return {
+    filename: String(filename || "document.html").split(/[\\/]/).pop(),
+    title: role === "overview" ? "Overview" : detectHtmlTitle(body || html, filename),
+    role,
+    include: true,
+    draft: /badge-draft|status-draft|>Draft</i.test(html) || /badge-draft|status-draft|>Draft</i.test(body),
+    num: detectHtmlNum(filename),
+    body: body.replaceAll("&amp;amp;", "&amp;"),
+    id: "",
+  };
+}
+
+function splitBuiltPackHtml(html, filename) {
+  const docs = [];
+  const usedNames = new Set();
+  const usedNums = new Set();
+  const uniqueName = (num, title) => {
+    const stem = String(title || "Page").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 72) || "Page";
+    let name = `${num}_${stem}.html`;
+    let extra = 2;
+    while (usedNames.has(name.toLowerCase())) {
+      name = `${num}_${stem}_${extra}.html`;
+      extra += 1;
+    }
+    usedNames.add(name.toLowerCase());
+    return name;
+  };
+  let pos = 0;
+  const lower = html.toLowerCase();
+  while (true) {
+    let start = pos;
+    while (true) {
+      const at = lower.indexOf("<section", start);
+      if (at === -1) {
+        start = -1;
+        break;
+      }
+      const next = html[at + 8] || "";
+      if (" \t\r\n/>".includes(next)) {
+        start = at;
+        break;
+      }
+      start = at + 1;
+    }
+    if (start === -1) break;
+    const gt = html.indexOf(">", start);
+    if (gt === -1) break;
+    const openTag = html.slice(start, gt + 1);
+    if (!/\bclass="[^"]*\bchapter\b/i.test(openTag)) {
+      pos = start + 8;
+      continue;
+    }
+    const end = matchingTagEnd(html, start, "section");
+    let inner = cleanImportedBody(html.slice(gt + 1, end - "</section>".length));
+    const sectionId = attrFromTag(openTag, "id");
+    const role = sectionId === "overview" ? "overview" : "chapter";
+    const heading = inner.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || inner.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+    let title = heading ? decodeEntities(heading[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()) : "";
+    let num = role === "overview" ? "00" : (sectionId.match(/^flow-(\d{1,2})$/) || [])[1] || "";
+    if (role === "overview") title = "Contents";
+    if (!title) title = role === "overview" ? "Contents" : "New page";
+    if (role !== "overview" && (!num || usedNums.has(num.padStart(2, "0")))) {
+      let seq = 1;
+      while (usedNums.has(String(seq).padStart(2, "0"))) seq += 1;
+      num = String(seq).padStart(2, "0");
+    }
+    if (num) num = String(num).padStart(2, "0");
+    usedNums.add(num);
+    docs.push({
+      filename: uniqueName(num, role === "overview" ? "Contents" : title),
+      title,
+      role,
+      include: true,
+      draft: /badge-draft|status-draft|>Draft</i.test(inner),
+      num,
+      body: inner,
+      id: sectionId || "",
+    });
+    pos = end;
+  }
+  if (!docs.length) throw new Error("That pack file has no pages to edit");
+  return { docs, settings: settingsFromPackHtml(html, filename) };
+}
+
 async function ingestFiles(fileList) {
-  const files = [];
-  const images = {};
-  for (const file of fileList) {
-    const name = file.name;
-    const lower = name.toLowerCase();
-    if (lower.endsWith(".html")) {
-      files.push({ filename: name, html: await file.text() });
-      continue;
+  try {
+    setStatus("Reading files…");
+    const files = [];
+    const images = {};
+    const localDocs = [];
+    let localSettings = null;
+    let importedPackHtml = "";
+    for (const file of fileList) {
+      const name = file.name;
+      const lower = name.toLowerCase();
+      if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+        const html = await file.text();
+        if (isBuiltPackHtml(html)) {
+          const split = splitBuiltPackHtml(html, name);
+          localDocs.push(...split.docs);
+          localSettings = split.settings;
+          importedPackHtml = html;
+          continue;
+        }
+        if (isPackReadyHtml(html)) {
+          localDocs.push(docFromReadyHtml(html, name));
+          continue;
+        }
+        files.push({ filename: name, html });
+        continue;
+      }
+      if (/\.docx?$/i.test(name)) {
+        files.push({ filename: name, docx: await readAsBase64(file) });
+        continue;
+      }
+      if (/\.(pptx?|pptm|ppsx?|ppsm)$/i.test(name)) {
+        files.push({ filename: name, pptx: await readAsBase64(file) });
+        continue;
+      }
+      if (/\.(png|jpe?g|gif|svg|webp)$/i.test(name)) {
+        const data = await readAsDataURL(file);
+        for (const key of imageKeys(file)) images[key] = data;
+      }
     }
-    if (/\.docx?$/i.test(name)) {
-      files.push({ filename: name, docx: await readAsBase64(file) });
-      continue;
+    if (!files.length && !localDocs.length) {
+      setStatus("No HTML, Word, or PowerPoint files found", "error");
+      return;
     }
-    if (/\.(pptx?|pptm|ppsx?|ppsm)$/i.test(name)) {
-      files.push({ filename: name, pptx: await readAsBase64(file) });
-      continue;
+    const skipPreview = Boolean(importedPackHtml) && !files.length;
+    if (localDocs.length) {
+      applyIncomingSettings(localSettings);
+      await mergeIncoming(localDocs, { skipOverview: true, skipPreview });
     }
-    if (/\.(png|jpe?g|gif|svg|webp)$/i.test(name)) {
-      const data = await readAsDataURL(file);
-      for (const key of imageKeys(file)) images[key] = data;
+    if (!files.length) {
+      if (importedPackHtml) {
+        state.lastHtml = importedPackHtml;
+        state.useImportedPreview = true;
+        showPreviewHtml(importedPackHtml);
+      }
+      setStatus(`${state.docs.length} page${state.docs.length === 1 ? "" : "s"} loaded`, "ok");
+      return;
     }
+    setStatus("Converting pages…");
+    const { res, data } = await postJson("/api/ingest", { files, images });
+    if (!res.ok) {
+      setStatus(data.error || "Could not read files", "error");
+      return;
+    }
+    applyIncomingSettings(data.settings);
+    await mergeIncoming(data.docs || [], { skipOverview: Boolean(data.overview_synced) });
+    setStatus(`${state.docs.length} page${state.docs.length === 1 ? "" : "s"} loaded`, "ok");
+  } catch (err) {
+    setStatus(err.message || "Could not convert those files", "error");
   }
-  if (!files.length) {
-    setStatus("No HTML, Word, or PowerPoint files found", "error");
-    return;
-  }
-  setStatus("Converting pages…");
-  const res = await fetch("/api/ingest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ files, images }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    setStatus(data.error || "Could not read files", "error");
-    return;
-  }
-  applyIncomingSettings(data.settings);
-  await mergeIncoming(data.docs || []);
-  setStatus(`${state.docs.length} page${state.docs.length === 1 ? "" : "s"} loaded`, "ok");
 }
 
 els.dropzone.addEventListener("click", () => els.fileInput.click());
@@ -686,10 +1075,29 @@ document.querySelectorAll(".tabs button").forEach((button) => {
   });
 });
 
-["page-title", "header-doc", "logo-url", "logo-alt", "confidential", "footer", "output-filename"].forEach((id) => {
-  document.getElementById(id).addEventListener("input", () => schedulePreview());
-  document.getElementById(id).addEventListener("change", () => schedulePreview());
+["page-title", "header-doc", "logo-url", "logo-alt", "favicon-url", "confidential", "footer", "output-filename"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("input", () => {
+    if (id === "favicon-url" || id === "logo-url") syncFaviconPreview();
+    schedulePreview();
+  });
+  el.addEventListener("change", () => {
+    if (id === "favicon-url" || id === "logo-url") syncFaviconPreview();
+    schedulePreview();
+  });
 });
+
+els.faviconChoose?.addEventListener("click", () => els.faviconFile?.click());
+els.faviconFile?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (file) readFaviconFile(file);
+});
+els.faviconPreview?.addEventListener("error", () => {
+  els.faviconPreview.hidden = true;
+});
+syncFaviconPreview();
 
 [
   "theme-magenta",
@@ -1355,20 +1763,33 @@ function emptyPreview(message) {
 
 async function refreshPreview() {
   if (!state.docs.some((d) => d.include)) return;
-  setStatus("Building preview…");
-  const res = await fetch("/api/build", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    setStatus(data.error || "Build failed", "error");
+  if (state.useImportedPreview && state.lastHtml) {
+    showPreviewHtml(state.lastHtml);
     return;
   }
-  state.lastHtml = data.html;
-  showPreviewHtml(data.html);
-  setStatus("Preview up to date", "ok");
+  setStatus("Building preview…");
+  try {
+    const { res, data } = await postJson("/api/build", buildPayload());
+    if (!res.ok) {
+      if (state.lastHtml) {
+        showPreviewHtml(state.lastHtml);
+        setStatus(data.error || "Preview is showing the imported pack; rebuild timed out", "error");
+        return;
+      }
+      setStatus(data.error || "Build failed", "error");
+      return;
+    }
+    state.lastHtml = data.html;
+    showPreviewHtml(data.html);
+    setStatus("Preview up to date", "ok");
+  } catch (err) {
+    if (state.lastHtml) {
+      showPreviewHtml(state.lastHtml);
+      setStatus("Preview is showing the imported pack; rebuild timed out", "error");
+      return;
+    }
+    setStatus(err.message || "Build failed", "error");
+  }
 }
 
 function showPreviewHtml(html) {
@@ -1486,7 +1907,10 @@ function flushEditor() {
   const doc = docById(state.selected);
   if (!doc || PackEditor.loadedId !== doc.id) return;
   const html = PackEditor.flush();
-  if (html) doc.body = html;
+  if (html) {
+    if (doc.body !== html) state.useImportedPreview = false;
+    doc.body = html;
+  }
 }
 
 function loadEditor() {
@@ -1516,29 +1940,46 @@ function loadEditor() {
 async function downloadPack() {
   flushEditor();
   setStatus("Creating file…");
-  const res = await fetch("/api/build", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildPayload()),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    setStatus(data.error || "Download failed", "error");
-    return;
+  const filename = settingsPayload().output_filename;
+  try {
+    const { res, data } = await postJson("/api/build", buildPayload());
+    if (!res.ok) {
+      if (state.lastHtml) {
+        triggerHtmlDownload(state.lastHtml, filename);
+        setStatus("Downloaded the imported pack; rebuild timed out", "error");
+        return;
+      }
+      setStatus(data.error || "Download failed", "error");
+      return;
+    }
+    triggerHtmlDownload(data.html, data.filename || filename);
+    setStatus("Downloaded " + (data.filename || filename), "ok");
+  } catch (err) {
+    if (state.lastHtml) {
+      triggerHtmlDownload(state.lastHtml, filename);
+      setStatus("Downloaded the imported pack; rebuild timed out", "error");
+      return;
+    }
+    setStatus(err.message || "Download failed", "error");
   }
-  const blob = new Blob([data.html], { type: "text/html;charset=utf-8" });
+}
+
+function triggerHtmlDownload(html, filename) {
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = data.filename || settingsPayload().output_filename;
+  a.download = filename || "documentation.html";
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  setStatus("Downloaded " + a.download, "ok");
 }
 
-els.btnPreview.addEventListener("click", () => schedulePreview(true));
+els.btnPreview.addEventListener("click", () => {
+  state.useImportedPreview = false;
+  schedulePreview(true);
+});
 els.btnDownload.addEventListener("click", () => downloadPack());
 els.btnAddPage.addEventListener("click", () => addBlankPage());
 

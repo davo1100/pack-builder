@@ -58,6 +58,15 @@
         <label for="logo-alt">Logo alt text</label>
         <input id="logo-alt" type="text" value="Edenred Payment Solutions">
       </div>
+      <div class="field">
+        <label for="favicon-url">Browser tab icon</label>
+        <input id="favicon-url" type="text" placeholder="https://… or upload a .ico, .png, or .svg" value="" autocomplete="off">
+        <div class="favicon-actions">
+          <input id="favicon-file" type="file" accept=".ico,.png,.svg,.gif,.webp,.jpg,.jpeg,image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,image/gif,image/webp,image/jpeg" hidden>
+          <button class="btn btn-quiet" type="button" id="favicon-choose">Upload icon</button>
+          <img id="favicon-preview" class="favicon-preview" alt="Favicon preview" hidden>
+        </div>
+      </div>
       <label class="check">
         <input id="confidential" type="checkbox" checked>
         Show Confidential badge
@@ -533,6 +542,6 @@
   <script src="js/flow-image.js?v=seq-import15"></script>
   <script src="js/flow-render.js?v=seq-import15"></script>
   <script src="js/flow-studio.js?v=wsdl-xml3"></script>
-  <script src="js/studio.js?v=seq-import15"></script>
+  <script src="js/studio.js?v=ingest2"></script>
 </body>
 </html>
