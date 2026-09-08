@@ -844,6 +844,33 @@ li {
   border-radius: 0 0 14px 14px;
 }
 
+.pack-tab-panel:has(> .pack-flow:first-child),
+.pack-tab-panel:has(> .pack-html:first-child),
+.pack-tab-panel:has(> .pack-image:first-child),
+.pack-tab-panel:has(> .diagram-container:first-child) {
+  padding-top: 0;
+}
+
+.pack-tab-panel:has(> .pack-flow:only-child),
+.pack-tab-panel:has(> .pack-html:only-child),
+.pack-tab-panel:has(> .pack-image:only-child),
+.pack-tab-panel:has(> .diagram-container:only-child) {
+  padding: 0;
+}
+
+.pack-tab-panel > .pack-flow:first-child,
+.pack-tab-panel > .pack-html:first-child,
+.pack-tab-panel > .pack-image:first-child,
+.pack-tab-panel > .diagram-container:first-child {
+  margin-top: 0;
+}
+
+.pack-tab-panel > .pack-flow:only-child {
+  margin: 0;
+  border: 0;
+  border-radius: 0 0 12px 12px;
+}
+
 .pack-tabs:has(.pack-tab-radio[value="0"]:checked) .pack-tab-panel[data-tab="0"],
 .pack-tabs:has(.pack-tab-radio[value="1"]:checked) .pack-tab-panel[data-tab="1"],
 .pack-tabs:has(.pack-tab-radio[value="2"]:checked) .pack-tab-panel[data-tab="2"],

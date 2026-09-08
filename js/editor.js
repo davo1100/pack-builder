@@ -980,6 +980,15 @@ const PackEditor = {
       }
     }
 
+    const panel = target?.matches?.(".pack-tab-panel")
+      ? target
+      : target?.closest?.(".pack-tab-panel") || null;
+    if (panel && this._isTabPlaceholder(panel) && nodes.some((node) => node.nodeType === 1)) {
+      panel.replaceChildren();
+      target = panel;
+      position = "beforeend";
+    }
+
     if (position === "afterbegin") {
       target.prepend(...nodes);
     } else if (position === "afterend") {
@@ -997,6 +1006,30 @@ const PackEditor = {
     if (placed?.matches?.(BLOCK_SELECTOR)) this._select(placed);
     else if (placed) this.anchor = placed;
     this._changed();
+  },
+
+  _isTabPlaceholder(panel) {
+    if (!panel?.matches?.(".pack-tab-panel")) return false;
+    const text = String(panel.textContent || "").replace(/\u00a0/g, " ").trim().toLowerCase();
+    if (!text || text === "add copy here." || text === "add copy here") return true;
+    const meaningful = [...panel.children].some((node) => {
+      if (node.matches?.("br")) return false;
+      if (node.matches?.(".pack-flow, .pack-html, .pack-image, .diagram-container, table, img, svg, iframe")) return true;
+      const inner = String(node.textContent || "").replace(/\u00a0/g, " ").trim().toLowerCase();
+      return Boolean(inner) && inner !== "add copy here." && inner !== "add copy here";
+    });
+    return !meaningful;
+  },
+
+  _stripTabPlaceholderAroundObjects(panel) {
+    if (!panel?.matches?.(".pack-tab-panel")) return;
+    const hasObject = panel.querySelector(":scope > .pack-flow, :scope > .pack-html, :scope > .pack-image, :scope > .diagram-container");
+    if (!hasObject) return;
+    [...panel.children].forEach((node) => {
+      if (node.matches?.(".pack-flow, .pack-html, .pack-image, .diagram-container, table")) return;
+      const inner = String(node.textContent || "").replace(/\u00a0/g, " ").trim().toLowerCase();
+      if (!inner || inner === "add copy here." || inner === "add copy here") node.remove();
+    });
   },
 
   insertInline(html) {
@@ -1179,6 +1212,7 @@ const PackEditor = {
     });
     root.querySelectorAll(".pack-tab-panel").forEach((el) => {
       el.setAttribute("contenteditable", "true");
+      this._stripTabPlaceholderAroundObjects(el);
     });
     root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow, .pack-html").forEach((el) => {
       const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow, .pack-html") || el;
