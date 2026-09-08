@@ -17,6 +17,7 @@ const BLOCK_SELECTOR = [
   ".rule-grid",
   "details.code-fold",
   ".code-container",
+  ".pack-html",
   "table",
 ].join(", ");
 
@@ -60,6 +61,7 @@ const PackEditor = {
     this.onSelect = handlers.onSelect || (() => {});
     this.onEditDiagram = handlers.onEditDiagram || (() => {});
     this.onEditFlow = handlers.onEditFlow || (() => {});
+    this.onEditHtml = handlers.onEditHtml || (() => {});
     this.onHistory = handlers.onHistory || (() => {});
     iframe.addEventListener("load", () => this._prepare());
   },
@@ -125,6 +127,22 @@ const PackEditor = {
       width: 100%;
       height: auto;
       border-radius: 8px;
+    }
+    .pack-html {
+      margin: 16px 0;
+      outline: 1px dashed rgba(126, 109, 226, 0.4);
+      outline-offset: 6px;
+      min-height: 1.2em;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .pack-html-frame {
+      display: block;
+      width: 100%;
+      border: 0;
+      min-height: 80px;
+      pointer-events: none;
+      background: transparent;
     }
     .pack-image-left { margin-right: auto; margin-left: 0; }
     .pack-image-center { margin-left: auto; margin-right: auto; }
@@ -239,6 +257,11 @@ const PackEditor = {
       el.removeAttribute("data-lock-label");
     });
     clone.querySelectorAll(".pack-image-handle").forEach((el) => el.remove());
+    clone.querySelectorAll(".pack-html-frame").forEach((frame) => {
+      frame.removeAttribute("srcdoc");
+      frame.removeAttribute("data-mounted");
+      frame.style.removeProperty("height");
+    });
     return clone.innerHTML;
   },
 
@@ -309,6 +332,54 @@ const PackEditor = {
 
   insertHtml(html) {
     this._placeHtml(html, { pageLevel: false });
+  },
+
+  htmlFromSelection() {
+    if (this.selected?.matches?.(".pack-html")) return this.selected;
+    return this.selected?.closest?.(".pack-html") || this.anchor?.closest?.(".pack-html") || null;
+  },
+
+  htmlSource() {
+    const block = this.htmlFromSelection();
+    if (!block) return "";
+    const encoded = block.getAttribute("data-html-src");
+    if (encoded && typeof PackHtml !== "undefined") return PackHtml.decode(encoded);
+    const frame = block.querySelector(".pack-html-frame");
+    if (frame?.srcdoc && typeof PackHtml !== "undefined") return PackHtml.stripBridge(frame.srcdoc);
+    return block.innerHTML || "";
+  },
+
+  _htmlBlock(source) {
+    const doc = this.doc();
+    const wrap = doc.createElement("div");
+    wrap.className = "pack-html";
+    if (typeof PackHtml !== "undefined") wrap.setAttribute("data-html-src", PackHtml.encode(source));
+    const frame = doc.createElement("iframe");
+    frame.className = "pack-html-frame";
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("title", "Embedded HTML");
+    wrap.appendChild(frame);
+    return wrap;
+  },
+
+  insertHtmlSnippet(raw) {
+    const source = String(raw || "").trim();
+    if (!source || !this.root() || typeof PackHtml === "undefined") return false;
+    if (!this._insertContainer()) return false;
+    this._placeElement(this._htmlBlock(source), { pageLevel: false });
+    return true;
+  },
+
+  replaceHtmlSnippet(raw) {
+    const block = this.htmlFromSelection();
+    const source = String(raw || "").trim();
+    if (!block || !source || typeof PackHtml === "undefined") return false;
+    block.setAttribute("data-html-src", PackHtml.encode(source));
+    block.replaceChildren(this._htmlBlock(source).firstChild);
+    this._prepare();
+    this._select(block);
+    this._changed();
+    return true;
   },
 
   _safeImageSrc(src) {
@@ -678,6 +749,8 @@ const PackEditor = {
       if (fromAnchor) return fromAnchor;
     }
     if (selected?.matches?.(".overview-section")) return selected;
+    const cards = this.root()?.querySelectorAll(".content-card, .overview-section");
+    if (cards?.length === 1) return cards[0];
     return null;
   },
 
@@ -685,6 +758,20 @@ const PackEditor = {
     const root = this.root();
     const doc = this.doc();
     if (!root || !doc || !html) return;
+    const template = doc.createElement("template");
+    template.innerHTML = html.trim();
+    this._placeNodes([...template.content.childNodes], options);
+  },
+
+  _placeElement(el, options) {
+    if (!el) return;
+    this._placeNodes([el], options);
+  },
+
+  _placeNodes(nodes, options) {
+    const root = this.root();
+    const doc = this.doc();
+    if (!root || !doc || !nodes?.length) return;
     const pageLevel = Boolean(options?.pageLevel);
     const selected = this.selected;
     let target = null;
@@ -721,9 +808,6 @@ const PackEditor = {
       }
     }
 
-    const template = doc.createElement("template");
-    template.innerHTML = html.trim();
-    const nodes = [...template.content.childNodes];
     if (position === "afterbegin") {
       target.prepend(...nodes);
     } else if (position === "afterend") {
@@ -895,6 +979,7 @@ const PackEditor = {
     if (!root || !doc) return;
     this.loadedId = this.pendingId;
     this._refreshFlows();
+    if (typeof PackHtml !== "undefined") PackHtml.bind(root);
     root.setAttribute("contenteditable", "true");
     this._wrapLooseImages();
     this._markFlowCandidates();
@@ -908,13 +993,14 @@ const PackEditor = {
         figure.appendChild(handle);
       }
     });
-    root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow").forEach((el) => {
-      const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow") || el;
+    root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow, .pack-html").forEach((el) => {
+      const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow, .pack-html") || el;
       lock.setAttribute("contenteditable", "false");
       lock.setAttribute("data-protected", "true");
       if (lock.matches("table") || lock.querySelector("table")) lock.setAttribute("data-lock-label", "Table");
       else if (lock.matches(".diagram-container")) lock.setAttribute("data-lock-label", "Diagram");
       else if (lock.matches(".pack-flow")) lock.setAttribute("data-lock-label", "API flow");
+      else if (lock.matches(".pack-html")) lock.setAttribute("data-lock-label", "HTML");
       else lock.setAttribute("data-lock-label", "Code");
     });
     root.querySelectorAll("pre, pre code").forEach((el) => {
@@ -959,6 +1045,13 @@ const PackEditor = {
           event.preventDefault();
           this.lastFlow = flow;
           this.onEditFlow(flow);
+          return;
+        }
+        const htmlBlock = event.target.closest(".pack-html");
+        if (htmlBlock) {
+          event.preventDefault();
+          this._select(htmlBlock);
+          this.onEditHtml(htmlBlock);
           return;
         }
         const diagram = event.target.closest(".diagram-container");
@@ -1126,6 +1219,7 @@ const PackEditor = {
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
     if (el.matches(".pack-flow, .pack-flow *")) return "API flow";
     if (el.matches(".code-fold, .code-container, pre")) return "Code example";
+    if (el.matches(".pack-html, .pack-html *")) return "HTML";
     if (el.matches("table")) return "Table";
     if (el.matches(".callout, .callout-warning")) return "Callout";
     return el.tagName.toLowerCase();

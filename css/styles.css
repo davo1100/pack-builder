@@ -1299,6 +1299,21 @@ h3 .pack-icon,
   margin-bottom: 0;
 }
 
+.pack-html {
+  margin: 16px 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pack-html-frame {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  min-height: 80px;
+}
+
 .checklist-box li {
   display: flex;
   gap: 8px;

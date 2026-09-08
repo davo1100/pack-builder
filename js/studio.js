@@ -1434,6 +1434,11 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
     openFlowStudio(true);
     return;
   }
+  if (event.target.closest("#btn-edit-html")) {
+    closeInsertMenu();
+    openHtmlModal("edit");
+    return;
+  }
   if (event.target.closest("#btn-convert-diagram-flow") || event.target.closest("#btn-convert-image-flow")) {
     closeInsertMenu();
     convertSelectedDiagramToFlow();
@@ -1452,6 +1457,10 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
     }
     if (insert.dataset.insert === "image") {
       openImageModal("add");
+      return;
+    }
+    if (insert.dataset.insert === "html") {
+      openHtmlModal("add");
       return;
     }
     PackEditor.insert(insert.dataset.insert);
@@ -1579,6 +1588,9 @@ PackEditor.bind(els.editor, {
     if (diagramTools) diagramTools.hidden = !isDiagram;
     const flowTools = document.getElementById("flow-tools");
     if (flowTools) flowTools.hidden = !isFlow;
+    const htmlTools = document.getElementById("html-tools");
+    const htmlBlock = PackEditor.htmlFromSelection();
+    if (htmlTools) htmlTools.hidden = !htmlBlock;
     const codeTools = document.getElementById("code-tools");
     const code = PackEditor.codeInfo();
     const codeTitle = document.getElementById("code-title");
@@ -1602,6 +1614,8 @@ PackEditor.bind(els.editor, {
         : "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
     } else if (isFlow) {
       els.editorHint.textContent = "API flow selected. Click Edit flow, or double-click it to reopen Flow Studio.";
+    } else if (htmlBlock) {
+      els.editorHint.textContent = "HTML selected. Click Edit HTML, or double-click it to change the markup.";
     } else if (code) {
       els.editorHint.textContent = "Code selected. Change the title here. The code itself stays plain text.";
     } else if (image) {
@@ -1634,6 +1648,9 @@ PackEditor.bind(els.editor, {
   },
   onEditFlow() {
     openFlowStudio(true);
+  },
+  onEditHtml() {
+    openHtmlModal("edit");
   },
 });
 
@@ -1777,6 +1794,10 @@ document.getElementById("diagram-height").addEventListener("change", (event) => 
 document.addEventListener("keydown", (event) => {
   if (!document.getElementById("image-modal").hidden && event.key === "Escape") {
     closeImageModal();
+    return;
+  }
+  if (!document.getElementById("html-modal").hidden && event.key === "Escape") {
+    closeHtmlModal();
     return;
   }
   if (!document.getElementById("flow-modal").hidden && event.key === "Escape") {
@@ -1934,6 +1955,76 @@ document.getElementById("image-alt-edit").addEventListener("input", (event) => {
 
 document.getElementById("btn-replace-image").addEventListener("click", () => {
   openImageModal("replace");
+});
+
+let htmlModalMode = "add";
+
+function openHtmlModal(mode) {
+  htmlModalMode = mode === "edit" ? "edit" : "add";
+  if (htmlModalMode === "add" && !PackEditor._insertContainer()) {
+    setStatus("Click inside a section first, then insert HTML", "error");
+    return;
+  }
+  if (htmlModalMode === "edit" && !PackEditor.htmlFromSelection()) {
+    setStatus("Click an HTML block first, or use + HTML to insert one", "error");
+    return;
+  }
+  const modal = document.getElementById("html-modal");
+  const title = document.getElementById("html-modal-title");
+  const apply = document.getElementById("html-apply");
+  const source = document.getElementById("html-source");
+  title.textContent = htmlModalMode === "edit" ? "Edit HTML" : "Insert HTML";
+  apply.textContent = htmlModalMode === "edit" ? "Update HTML" : "Insert HTML";
+  source.value = htmlModalMode === "edit" ? PackEditor.htmlSource() : "";
+  modal.hidden = false;
+  source.focus();
+}
+
+function closeHtmlModal() {
+  const modal = document.getElementById("html-modal");
+  if (modal) modal.hidden = true;
+}
+
+function applyHtmlSnippet() {
+  const raw = document.getElementById("html-source").value;
+  const ok = htmlModalMode === "edit"
+    ? PackEditor.replaceHtmlSnippet(raw)
+    : PackEditor.insertHtmlSnippet(raw);
+  if (!ok) {
+    if (!String(raw || "").trim()) setStatus("Paste some HTML to render in the section", "error");
+    else setStatus("Click inside a section first, then insert HTML", "error");
+    return;
+  }
+  closeHtmlModal();
+  setStatus(htmlModalMode === "edit" ? "HTML updated" : "HTML inserted", "ok");
+  schedulePreview(true);
+}
+
+document.getElementById("html-cancel").addEventListener("click", () => closeHtmlModal());
+document.getElementById("html-apply").addEventListener("click", () => applyHtmlSnippet());
+document.getElementById("html-source").addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    event.preventDefault();
+    applyHtmlSnippet();
+  }
+});
+document.getElementById("html-modal").addEventListener("click", (event) => {
+  if (event.target.id === "html-modal") closeHtmlModal();
+});
+
+document.getElementById("html-choose-file").addEventListener("click", () => {
+  document.getElementById("html-file").click();
+});
+document.getElementById("html-file").addEventListener("change", (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("html-source").value = String(reader.result || "");
+  };
+  reader.onerror = () => setStatus("Could not read that HTML file", "error");
+  reader.readAsText(file);
 });
 
 document.getElementById("image-cancel").addEventListener("click", () => closeImageModal());

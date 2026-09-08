@@ -1617,9 +1617,12 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
   </div>
 """
     zoom_js = load_pack_zoom_js()
+    html_js = load_pack_html_js()
     lang_js = load_pack_lang_js()
     if zoom_js:
         html += _inline_script(zoom_js)
+    if html_js:
+        html += _inline_script(html_js)
     if lang_js:
         html += _inline_script(lang_js)
     return html + "</body>\n</html>\n"
@@ -1754,6 +1757,14 @@ def _inline_script(js: str) -> str:
 
 def load_pack_zoom_js() -> str:
     path = ROOT / "js" / "pack-zoom.js"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+
+def load_pack_html_js() -> str:
+    path = ROOT / "js" / "pack-html.js"
     try:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:

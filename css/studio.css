@@ -736,6 +736,19 @@ h2.section:first-child {
   gap: 12px;
 }
 
+.html-sheet {
+  width: min(860px, 100%);
+}
+
+#html-source {
+  width: 100%;
+  min-height: 280px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .toolbar-split {
   width: 1px;
   height: 18px;

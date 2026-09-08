@@ -226,6 +226,7 @@
               <button type="button" data-insert="table">Table</button>
               <button type="button" data-insert="code">Code</button>
               <button type="button" data-insert="api">API</button>
+              <button type="button" data-insert="html">HTML</button>
             </div>
           </div>
           <div class="tool-group tool-context" id="column-tools" hidden>
@@ -254,6 +255,10 @@
           <div class="tool-group tool-context" id="flow-tools" hidden>
             <span class="toolbar-label">API flow</span>
             <button type="button" id="btn-edit-flow">Edit flow</button>
+          </div>
+          <div class="tool-group tool-context" id="html-tools" hidden>
+            <span class="toolbar-label">HTML</span>
+            <button type="button" id="btn-edit-html">Edit HTML</button>
           </div>
           <div class="tool-group tool-context" id="code-tools" hidden>
             <span class="toolbar-label">Code title</span>
@@ -398,6 +403,29 @@
     </div>
   </div>
 
+  <div id="html-modal" class="image-modal" hidden>
+    <div class="image-sheet html-sheet">
+      <header class="image-head">
+        <div>
+          <strong id="html-modal-title">Insert HTML</strong>
+          <span>Paste a snippet or a full HTML page. It renders inside the selected section.</span>
+        </div>
+        <button class="btn" type="button" id="html-cancel">Cancel</button>
+      </header>
+      <div class="image-body">
+        <div class="field">
+          <label for="html-source">HTML</label>
+          <textarea id="html-source" rows="14" spellcheck="false" placeholder="Paste a snippet, or a full HTML page with &lt;style&gt; and &lt;script&gt;"></textarea>
+        </div>
+        <div class="studio-actions" style="justify-content:flex-start; flex-wrap:wrap;">
+          <button class="btn" type="button" id="html-choose-file">Load HTML file</button>
+          <button class="btn btn-primary" type="button" id="html-apply">Insert HTML</button>
+        </div>
+        <input id="html-file" type="file" accept=".html,.htm,text/html" hidden>
+      </div>
+    </div>
+  </div>
+
   <div id="flow-modal" class="flow-modal" hidden>
     <div class="flow-sheet" data-platform="darwin">
       <header class="flow-head">
@@ -536,7 +564,8 @@
 
   <script src="js/icons.js"></script>
   <script src="js/syntax.js"></script>
-  <script src="js/editor.js?v=seq-import15"></script>
+  <script src="js/pack-html.js?v=insert-html3"></script>
+  <script src="js/editor.js?v=insert-html3"></script>
   <script src="js/diagram.js"></script>
   <script src="js/flow-ir.js?v=seq-import15"></script>
   <script src="js/flow-parse.js?v=wsdl-xml3"></script>
@@ -544,6 +573,6 @@
   <script src="js/flow-render.js?v=flow-tabs1"></script>
   <script src="js/flow-studio.js?v=flow-tabs1"></script>
   <script src="js/pack-lang.js?v=lang4"></script>
-  <script src="js/studio.js?v=lang3"></script>
+  <script src="js/studio.js?v=insert-html3"></script>
 </body>
 </html>
