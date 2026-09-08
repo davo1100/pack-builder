@@ -852,6 +852,16 @@ def _clean_imported_body(body: str) -> str:
     body = re.sub(r"\sdata-plain(?:=([\"'][^\"']*[\"']))?", "", body, flags=re.I)
     body = re.sub(r'\sdata-lock-label="[^"]*"', "", body, flags=re.I)
     body = re.sub(r'<p class="site-footer">[\s\S]*?</p>', "", body, flags=re.I)
+    body = re.sub(
+        r"\)\s*!==\s*-1\)\s*return html\.replace[\s\S]*?\(typeof window !== [\"']undefined[\"'] \? window : this\);",
+        "",
+        body,
+    )
+    body = re.sub(
+        r"global\.PackLang\s*=\s*\{[\s\S]*?\(typeof window !== [\"']undefined[\"'] \? window : this\);",
+        "",
+        body,
+    )
     return body.strip()
 
 
@@ -1209,8 +1219,10 @@ def contents_card(doc: Doc) -> str:
     )
     page_id = html_lib.escape(doc.filename, quote=True)
     icon_name = icon_for_title(doc.title)
+    flow = html_lib.escape(doc.num or "", quote=True)
+    anchor = html_lib.escape(doc.id or f"flow-{doc.num}", quote=True)
     return (
-        f'<div class="card" data-page-id="{page_id}" data-icon="{html_lib.escape(icon_name, quote=True)}">\n'
+        f'<div class="card" data-page-id="{page_id}" data-flow="{flow}">\n'
         "<div>\n"
         '<div class="card-header">\n'
         f'<span class="card-num">{html_lib.escape(doc.num)}</span>\n'
@@ -1220,7 +1232,7 @@ def contents_card(doc: Doc) -> str:
         f"<p>{html_lib.escape(page_summary(doc))}</p>\n"
         f"{tag_html}\n"
         "</div>\n"
-        f'<a class="btn-link" href="#{html_lib.escape(doc.id, quote=True)}">'
+        f'<a class="btn-link" href="#{anchor}">'
         f"<span>Open section</span> {icon_html('arrow-right', 16)}</a>\n"
         "</div>"
     )
@@ -1266,6 +1278,15 @@ def with_auto_contents(html: str, chapters: list[Doc]) -> str:
 
 def _extract_cards(grid_html: str) -> dict[str, str]:
     found: dict[str, str] = {}
+    for card in _extract_card_list(grid_html):
+        page_id = _card_page_id(card)
+        if page_id:
+            found[page_id] = card
+    return found
+
+
+def _extract_card_list(grid_html: str) -> list[str]:
+    found: list[str] = []
     marker = '<div class="card"'
     i = 0
     while True:
@@ -1273,12 +1294,70 @@ def _extract_cards(grid_html: str) -> dict[str, str]:
         if start == -1:
             break
         end = matching_div_end(grid_html, start)
-        card = grid_html[start:end]
-        page_id = re.search(r'data-page-id="([^"]+)"', card)
-        if page_id:
-            found[html_lib.unescape(page_id.group(1))] = card
+        found.append(grid_html[start:end])
         i = end
     return found
+
+
+def _card_page_id(card: str) -> str:
+    match = re.search(r'data-page-id="([^"]+)"', card)
+    return html_lib.unescape(match.group(1)) if match else ""
+
+
+def _card_href(card: str) -> str:
+    match = re.search(r'href="#([^"]+)"', card)
+    return match.group(1) if match else ""
+
+
+def _card_num_text(card: str) -> str:
+    match = re.search(r'<span class="card-num">([\s\S]*?)</span>', card)
+    return strip_tags(match.group(1)) if match else ""
+
+
+def _card_title_text(card: str) -> str:
+    match = re.search(r"<h3>([\s\S]*?)</h3>", card)
+    if not match:
+        return ""
+    heading = re.sub(r'<span class="pack-icon"[^>]*>[\s\S]*?</span>', "", match.group(1))
+    return strip_tags(heading)
+
+
+def _match_card(cards: list[str], doc: Doc, used: set[int]) -> int:
+    filename = (doc.filename or "").lower()
+    num = (doc.num or "").zfill(2) if doc.num else ""
+    title = (doc.title or "").strip().lower()
+
+    def take(pred) -> int:
+        for index, card in enumerate(cards):
+            if index in used:
+                continue
+            if pred(card):
+                used.add(index)
+                return index
+        return -1
+
+    idx = take(lambda card: _card_page_id(card).lower() == filename)
+    if idx >= 0:
+        return idx
+    idx = take(
+        lambda card: _card_href(card).lower() in {filename}
+    )
+    if idx >= 0:
+        return idx
+    idx = take(
+        lambda card: _card_num_text(card).zfill(2) == num and _card_title_text(card).lower() == title
+    )
+    if idx >= 0:
+        return idx
+    titled = [
+        index
+        for index, card in enumerate(cards)
+        if index not in used and _card_title_text(card).lower() == title
+    ]
+    if len(titled) == 1:
+        used.add(titled[0])
+        return titled[0]
+    return -1
 
 
 def _card_heading(card: str, title: str) -> str:
@@ -1295,10 +1374,15 @@ def _card_heading(card: str, title: str) -> str:
 
 def _refresh_card(card: str, doc: Doc) -> str:
     page_id = html_lib.escape(doc.filename, quote=True)
+    flow = html_lib.escape(doc.num or "", quote=True)
     if "data-page-id=" in card:
         card = re.sub(r'data-page-id="[^"]*"', f'data-page-id="{page_id}"', card, count=1)
     else:
         card = re.sub(r'<div class="card"', f'<div class="card" data-page-id="{page_id}"', card, count=1)
+    if "data-flow=" in card:
+        card = re.sub(r'data-flow="[^"]*"', f'data-flow="{flow}"', card, count=1)
+    else:
+        card = re.sub(r'<div class="card"', f'<div class="card" data-flow="{flow}"', card, count=1)
     card = re.sub(
         r'(<span class="card-num">)[\s\S]*?(</span>)',
         rf"\g<1>{html_lib.escape(doc.num)}\g<2>",
@@ -1315,7 +1399,12 @@ def _refresh_card(card: str, doc: Doc) -> str:
             card,
             count=1,
         )
-    card = re.sub(r'href="#[^"]+"', f'href="#{html_lib.escape(doc.id, quote=True)}"', card, count=1)
+    card = re.sub(
+        r'href="#[^"]+"',
+        f'href="#{html_lib.escape(doc.id or f"flow-{doc.num}", quote=True)}"',
+        card,
+        count=1,
+    )
     heading = _card_heading(card, doc.title)
     card = re.sub(r"<h3>([\s\S]*?)</h3>", lambda _m: heading, card, count=1)
     return card
@@ -1351,11 +1440,12 @@ def upsert_contents_section(html: str, chapters: list[Doc]) -> str:
     if not chapters:
         updated = block[:grid_at] + CONTENTS_EMPTY + block[grid_end:]
         return html[:div_start] + updated + html[end:]
-    existing = _extract_cards(block[grid_at:grid_end])
+    existing = _extract_card_list(block[grid_at:grid_end])
+    used: set[int] = set()
     cards = []
     for doc in chapters:
-        card = existing.pop(doc.filename, None)
-        cards.append(_refresh_card(card, doc) if card else contents_card(doc))
+        index = _match_card(existing, doc, used)
+        cards.append(_refresh_card(existing[index], doc) if index >= 0 else contents_card(doc))
     grid = '<div class="grid">\n' + "\n".join(cards) + "\n</div>"
     updated = block[:grid_at] + grid + block[grid_end:]
     return html[:div_start] + updated + html[end:]
@@ -1504,6 +1594,13 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     </a>
     <div class="header-meta">
       <span class="header-doc">{header_doc}</span>
+      <div class="pack-lang">
+        <select class="pack-lang-select" aria-label="Language">
+          <option value="en" selected>English</option>
+          <option value="fr">Français</option>
+        </select>
+        <span class="pack-lang-status" hidden></span>
+      </div>
       {confidential}
     </div>
   </header>
@@ -1520,8 +1617,11 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
   </div>
 """
     zoom_js = load_pack_zoom_js()
+    lang_js = load_pack_lang_js()
     if zoom_js:
-        html += "  <script>\n" + zoom_js + "\n  </script>\n"
+        html += _inline_script(zoom_js)
+    if lang_js:
+        html += _inline_script(lang_js)
     return html + "</body>\n</html>\n"
 
 
@@ -1643,8 +1743,25 @@ def load_client_css() -> str:
     return (ROOT / "css" / "styles.css").read_text(encoding="utf-8")
 
 
+def _inline_script(js: str) -> str:
+    # Escape only real HTML closers. Replacing every "</" also corrupts
+    # JavaScript like .replace(/</g, ...) and the pack script never runs.
+    safe = js
+    for token in ("</script", "</SCRIPT", "</body", "</BODY", "</head", "</HEAD"):
+        safe = safe.replace(token, "<\\/" + token[2:])
+    return "  <script>\n" + safe + "\n  </script>\n"
+
+
 def load_pack_zoom_js() -> str:
     path = ROOT / "js" / "pack-zoom.js"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+
+def load_pack_lang_js() -> str:
+    path = ROOT / "js" / "pack-lang.js"
     try:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Permissions-Policy" content="translator=(self)">
   <title>Client pack builder | Edenred Payment Solutions</title>
   <link rel="stylesheet" href="css/studio.css">
 </head>
@@ -124,7 +125,7 @@
         <button type="button" data-tab="edit">Edit selected page</button>
       </div>
       <div class="workspace" id="workspace-preview">
-        <iframe id="preview" title="Client pack preview" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <iframe id="preview" title="Client pack preview" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox" allow="translator"></iframe>
       </div>
       <div class="workspace" id="workspace-edit" hidden>
         <div class="editor-toolbar" id="text-toolbar">
@@ -542,6 +543,7 @@
   <script src="js/flow-image.js?v=seq-import15"></script>
   <script src="js/flow-render.js?v=flow-tabs1"></script>
   <script src="js/flow-studio.js?v=flow-tabs1"></script>
-  <script src="js/studio.js?v=ingest2"></script>
+  <script src="js/pack-lang.js?v=lang4"></script>
+  <script src="js/studio.js?v=lang3"></script>
 </body>
 </html>

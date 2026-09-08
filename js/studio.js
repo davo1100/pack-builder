@@ -331,57 +331,277 @@ function mergeIncoming(docs, options = {}) {
   if (lastId) state.selected = lastId;
   else if (!state.selected && state.docs.length) state.selected = state.docs[0].id;
   pinOverviews();
+  rebuildContentsFromMenu();
   renderList();
   els.btnDownload.disabled = !state.docs.some((d) => d.include);
   if (state.tab === "edit") loadEditor();
   if (state.tab === "preview") revealPreviewSelection();
   if (!options.skipPreview) schedulePreview();
-  if (options.skipOverview) return Promise.resolve();
-  return syncOverview({ skipFlush: true })
-    .then(() => {
-      renderList();
-      if (state.tab === "edit") loadEditor();
-      if (state.tab === "preview") revealPreviewSelection();
-      if (!options.skipPreview) schedulePreview();
-    })
-    .catch((err) => {
-      setStatus(err.message || "Pages loaded, but the contents page could not be updated", "error");
-    });
+  return Promise.resolve();
 }
 
-async function syncOverview(options) {
-  if (!state.docs.length) return;
+function syncOverview(options) {
+  if (!state.docs.length) return Promise.resolve();
   if (!options?.skipFlush) flushEditor();
-  const { res, data } = await postJson("/api/sync-overview", buildPayload());
-  if (!res.ok) {
-    setStatus(data.error || "Could not update contents page", "error");
-    return;
+  const overview = rebuildContentsFromMenu();
+  pinOverviews();
+  renderList();
+  if (overview && state.selected === overview.id && state.tab === "edit") loadEditor();
+  return Promise.resolve();
+}
+
+const CONTENTS_TITLE_ICONS = [
+  ["spend amount", "clock"],
+  ["amount limit", "clock"],
+  ["spend count", "clipboard"],
+  ["count limit", "clipboard"],
+  ["time restriction", "clock"],
+  ["time-of-day", "clock"],
+  ["date restriction", "calendar"],
+  ["calendar date", "calendar"],
+  ["acceptance method", "credit-card"],
+  ["country code", "globe"],
+  ["country", "globe"],
+  ["merchant", "store"],
+  ["spend", "sliders"],
+  ["account holder", "user"],
+  ["accountholder", "user"],
+  ["organisation", "building"],
+  ["organization", "building"],
+  ["onboard", "user-plus"],
+  ["card", "credit-card"],
+  ["transaction", "receipt"],
+  ["search", "search"],
+  ["provision", "smartphone"],
+  ["wallet", "wallet"],
+  ["google", "smartphone"],
+  ["apple", "smartphone"],
+  ["account", "building"],
+  ["api", "code"],
+  ["architecture", "layers"],
+  ["overview", "layers"],
+  ["flow", "git-branch"],
+];
+
+function menuChapters() {
+  return state.docs.filter((doc) => doc.include && doc.role !== "overview");
+}
+
+function iconForTitle(title) {
+  const hay = String(title || "").toLowerCase();
+  for (const [token, name] of CONTENTS_TITLE_ICONS) {
+    if (hay.includes(token)) return name;
   }
-  let overview = state.docs.find((doc) => doc.role === "overview")
-    || state.docs.find((doc) => doc.filename === data.filename);
-  const editingOverview = overview && state.selected === overview.id && state.tab === "edit";
+  return "file-text";
+}
+
+function pageSummary(doc) {
+  const body = String(doc.body || "");
+  for (const match of body.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const text = decodeEntities(match[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
+    if (text.length < 28) continue;
+    const lowered = text.toLowerCase();
+    if (lowered.startsWith("author:") || lowered.startsWith("created by") || lowered.startsWith("last modified") || lowered.startsWith("imported from")) {
+      continue;
+    }
+    return text.length > 220 ? `${text.slice(0, 217).replace(/\s+\S*$/, "")}…` : text;
+  }
+  const headings = [];
+  for (const match of body.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi)) {
+    const label = decodeEntities(match[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "))
+      .replace(/^\d+(?:\.\d+)*[.)]?\s*/, "")
+      .trim();
+    if (label) headings.push(label);
+    if (headings.length === 3) break;
+  }
+  if (headings.length) return `Includes ${headings.join(", ")}.`;
+  return `Open the ${doc.title} section.`;
+}
+
+function pageTags(doc) {
+  const tags = [];
+  const seen = new Set();
+  const body = String(doc.body || "");
+  for (const match of body.matchAll(/class="api-label">API<\/span>\s*<span class="api-value">([\s\S]*?)<\/span>/gi)) {
+    const text = decodeEntities(match[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    tags.push(text);
+    if (tags.length === 3) break;
+  }
+  return tags;
+}
+
+function contentsCardHtml(doc) {
+  const status = doc.draft
+    ? '<span class="card-status status-draft">Draft</span>'
+    : '<span class="card-status status-current">Current</span>';
+  const tags = pageTags(doc);
+  const tagHtml = tags.length
+    ? `<div class="card-tags">${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>`
+    : "";
+  const icon = typeof IconLibrary !== "undefined" ? IconLibrary.html(iconForTitle(doc.title), 18) : "";
+  const arrow = typeof IconLibrary !== "undefined" ? IconLibrary.html("arrow-right", 16) : "";
+  return (
+    `<div class="card" data-page-id="${escapeAttr(doc.filename)}" data-flow="${escapeAttr(chapterNum(doc.num))}">` +
+    "<div>" +
+    `<div class="card-header"><span class="card-num">${escapeHtml(chapterNum(doc.num))}</span>${status}</div>` +
+    `<h3>${icon} ${escapeHtml(doc.title)}</h3>` +
+    `<p>${escapeHtml(pageSummary(doc))}</p>${tagHtml}` +
+    "</div>" +
+    `<a class="btn-link" href="#${escapeAttr(packAnchorFor(doc))}"><span>Open section</span> ${arrow}</a>` +
+    "</div>"
+  );
+}
+
+function cardTitleText(card) {
+  const heading = card.querySelector("h3");
+  if (!heading) return "";
+  const clone = heading.cloneNode(true);
+  clone.querySelectorAll(".pack-icon, svg").forEach((node) => node.remove());
+  return decodeEntities(clone.textContent).replace(/\s+/g, " ").trim();
+}
+
+function takeMatchingCard(cards, doc) {
+  const filename = String(doc.filename || "").toLowerCase();
+  const num = chapterNum(doc.num);
+  const title = decodeEntities(doc.title || "").toLowerCase();
+  const hrefs = new Set([filename].filter(Boolean));
+  const tests = [
+    (card) => String(card.getAttribute("data-page-id") || "").toLowerCase() === filename,
+    (card) => hrefs.has(String(card.querySelector("a[href]")?.getAttribute("href") || "").replace(/^#/, "").toLowerCase())
+      || String(card.getAttribute("data-flow") || "") === num && cardTitleText(card).toLowerCase() === title,
+    (card) => String(card.querySelector(".card-num")?.textContent || "").trim().padStart(2, "0") === num
+      && cardTitleText(card).toLowerCase() === title,
+  ];
+  for (const test of tests) {
+    const index = cards.findIndex(test);
+    if (index >= 0) return cards.splice(index, 1)[0];
+  }
+  const titled = cards.filter((card) => cardTitleText(card).toLowerCase() === title);
+  if (titled.length === 1) {
+    cards.splice(cards.indexOf(titled[0]), 1);
+    return titled[0];
+  }
+  return null;
+}
+
+function refreshContentsCard(card, doc) {
+  card.setAttribute("data-page-id", doc.filename);
+  card.setAttribute("data-flow", chapterNum(doc.num));
+  const num = card.querySelector(".card-num");
+  if (num) num.textContent = chapterNum(doc.num);
+  const status = card.querySelector(".card-status");
+  if (status && !status.hasAttribute("data-custom")) {
+    status.className = `card-status ${doc.draft ? "status-draft" : "status-current"}`;
+    status.textContent = doc.draft ? "Draft" : "Current";
+  }
+  const link = card.querySelector("a.btn-link[href], a[href]");
+  if (link) link.setAttribute("href", `#${packAnchorFor(doc)}`);
+  const heading = card.querySelector("h3");
+  if (heading) {
+    const icon = heading.querySelector(".pack-icon");
+    heading.replaceChildren();
+    if (icon) heading.appendChild(icon);
+    else if (typeof IconLibrary !== "undefined") {
+      heading.insertAdjacentHTML("afterbegin", IconLibrary.html(iconForTitle(doc.title), 18));
+    }
+    heading.appendChild(document.createTextNode(` ${doc.title}`));
+  }
+  return card;
+}
+
+function overviewHeroHtml(count) {
+  const title = (els.pageTitle?.value || "Documentation").split("|")[0].trim() || "Documentation";
+  const subtitle = els.headerDoc?.value || "Technical documentation";
+  return (
+    `<header class="hero"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p>` +
+    `<div class="hero-meta"><span><strong>Sections:</strong> ${count}</span></div></header>`
+  );
+}
+
+function rebuildContentsFromMenu() {
+  const chapters = menuChapters();
+  let overview = state.docs.find((doc) => doc.role === "overview");
   if (!overview) {
     overview = {
       id: uid(),
-      filename: data.filename || "00_Contents.html",
-      title: data.title || "Contents",
+      filename: "00_Contents.html",
+      title: "Contents",
       role: "overview",
       include: true,
-      draft: Boolean(data.draft),
-      num: data.num || "00",
-      body: data.body || "",
+      draft: false,
+      num: "00",
+      body: "",
     };
     state.docs.unshift(overview);
     if (!state.selected) state.selected = overview.id;
-  } else {
-    overview.body = data.body || "";
-    overview.role = "overview";
-    overview.include = true;
-    overview.num = data.num || overview.num || "00";
-    if (data.filename) overview.filename = overview.filename || data.filename;
   }
-  pinOverviews();
-  if (editingOverview) loadEditor();
+  overview.role = "overview";
+  overview.include = true;
+  overview.num = overview.num || "00";
+  overview.filename = overview.filename || "00_Contents.html";
+  if (!overview.title) overview.title = "Contents";
+
+  let body = String(overview.body || "");
+  if (!/class=["']hero["']|class=["']page-header["']/.test(body)) {
+    body = overviewHeroHtml(chapters.length) + body;
+  }
+  body = body.replace(/(<strong>Sections:<\/strong> )\d+/, `$1${chapters.length}`);
+
+  const holder = document.createElement("div");
+  holder.innerHTML = body;
+  let section = holder.querySelector("[data-contents='auto']");
+  if (!section) {
+    section = document.createElement("div");
+    section.className = "overview-section";
+    section.setAttribute("data-contents", "auto");
+    const listIcon = typeof IconLibrary !== "undefined" ? IconLibrary.html("list") : "";
+    section.innerHTML = `<h2>${listIcon} Contents</h2>`;
+    holder.appendChild(section);
+  }
+  const emptyCopy = "Include at least one chapter page to list it here.";
+  const introCopy = "Each section of this pack, in reading order, with a short summary and a link to open it.";
+  let grid = section.querySelector(".grid");
+  if (!chapters.length) {
+    if (grid) grid.remove();
+    if (![...section.querySelectorAll("p")].some((p) => p.textContent.includes("Include at least one chapter"))) {
+      const empty = document.createElement("p");
+      empty.textContent = emptyCopy;
+      section.appendChild(empty);
+    }
+    overview.body = holder.innerHTML;
+    return overview;
+  }
+  if (![...section.querySelectorAll("p")].some((p) => p.textContent.includes("in reading order"))) {
+    const intro = document.createElement("p");
+    intro.textContent = introCopy;
+    if (grid) section.insertBefore(intro, grid);
+    else section.appendChild(intro);
+  }
+  [...section.querySelectorAll("p")].forEach((p) => {
+    if (p.textContent.includes("Include at least one chapter")) p.remove();
+  });
+  if (!grid) {
+    grid = document.createElement("div");
+    grid.className = "grid";
+    section.appendChild(grid);
+  }
+  const unused = [...grid.querySelectorAll(".card")];
+  const next = [];
+  for (const doc of chapters) {
+    const found = takeMatchingCard(unused, doc);
+    if (found) next.push(refreshContentsCard(found, doc));
+    else {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = contentsCardHtml(doc);
+      if (wrap.firstElementChild) next.push(wrap.firstElementChild);
+    }
+  }
+  grid.replaceChildren(...next);
+  overview.body = holder.innerHTML;
+  return overview;
 }
 
 function renderList() {
@@ -778,7 +998,9 @@ function cleanImportedBody(html) {
     .replace(/\sdata-protected(?:=(["'][^"']*["']))?/gi, "")
     .replace(/\sdata-plain(?:=(["'][^"']*["']))?/gi, "")
     .replace(/\sdata-lock-label="[^"]*"/gi, "")
-    .replace(/<p class="site-footer">[\s\S]*?<\/p>/gi, "");
+    .replace(/<p class="site-footer">[\s\S]*?<\/p>/gi, "")
+    .replace(/\)\s*!==\s*-1\)\s*return html\.replace[\s\S]*?\(typeof window !== ["']undefined["'] \? window : this\);/g, "")
+    .replace(/global\.PackLang\s*=\s*\{[\s\S]*?\(typeof window !== ["']undefined["'] \? window : this\);/g, "");
   const navMark = "border:0;margin-top:28px;justify-content:space-between";
   const pos = body.lastIndexOf(navMark);
   if (pos !== -1) {
@@ -1945,23 +2167,35 @@ async function downloadPack() {
     const { res, data } = await postJson("/api/build", buildPayload());
     if (!res.ok) {
       if (state.lastHtml) {
-        triggerHtmlDownload(state.lastHtml, filename);
+        await downloadTranslatedPack(state.lastHtml, filename);
         setStatus("Downloaded the imported pack; rebuild timed out", "error");
         return;
       }
       setStatus(data.error || "Download failed", "error");
       return;
     }
-    triggerHtmlDownload(data.html, data.filename || filename);
+    await downloadTranslatedPack(data.html, data.filename || filename);
     setStatus("Downloaded " + (data.filename || filename), "ok");
   } catch (err) {
     if (state.lastHtml) {
-      triggerHtmlDownload(state.lastHtml, filename);
+      await downloadTranslatedPack(state.lastHtml, filename);
       setStatus("Downloaded the imported pack; rebuild timed out", "error");
       return;
     }
     setStatus(err.message || "Download failed", "error");
   }
+}
+
+async function downloadTranslatedPack(html, filename) {
+  let packed = html;
+  if (window.PackLang?.embedTranslations) {
+    try {
+      packed = await PackLang.embedTranslations(html, (message) => setStatus(message));
+    } catch (err) {
+      packed = html;
+    }
+  }
+  triggerHtmlDownload(packed, filename);
 }
 
 function triggerHtmlDownload(html, filename) {
