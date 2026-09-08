@@ -1470,6 +1470,9 @@ document.getElementById("layout-toolbar").addEventListener("click", (event) => {
     if (insert.dataset.insert === "columns") {
       setStatus("Columns added — click a column to write in it, or change 2–4 columns here", "ok");
     }
+    if (insert.dataset.insert === "tabs") {
+      setStatus("Tabs added — name them here, then click inside a tab to add a flow, table, or HTML", "ok");
+    }
     return;
   }
   const button = event.target.closest("button[data-layout]");
@@ -1606,6 +1609,12 @@ PackEditor.bind(els.editor, {
     const columns = PackEditor.columnsInfo();
     if (columnTools) columnTools.hidden = !columns;
     if (columns) syncColumnTools(columns);
+    const tabTools = document.getElementById("tab-tools");
+    const tabs = PackEditor.tabsInfo();
+    const tabTitle = document.getElementById("tab-title");
+    if (tabTools) tabTools.hidden = !tabs;
+    if (tabs) syncTabTools(tabs);
+    if (tabs && tabTitle && document.activeElement !== tabTitle) tabTitle.value = tabs.title;
     renderSectionOutline();
     syncFlowConvertButtons();
     if (isDiagram) {
@@ -1616,6 +1625,8 @@ PackEditor.bind(els.editor, {
       els.editorHint.textContent = "API flow selected. Click Edit flow, or double-click it to reopen Flow Studio.";
     } else if (htmlBlock) {
       els.editorHint.textContent = "HTML selected. Click Edit HTML, or double-click it to change the markup.";
+    } else if (tabs) {
+      els.editorHint.textContent = "Tabs selected. Name the current tab here, add more, then click inside a tab to insert a flow, table, or HTML.";
     } else if (code) {
       els.editorHint.textContent = "Code selected. Change the title here. The code itself stays plain text.";
     } else if (image) {
@@ -1852,6 +1863,15 @@ function syncColumnTools(info) {
   });
 }
 
+function syncTabTools(info) {
+  document.querySelectorAll("#tab-tools [data-tabs]").forEach((button) => {
+    const key = button.dataset.tabs;
+    if (key === "add") button.disabled = info.count >= 6;
+    else if (key === "remove") button.disabled = info.count <= 2;
+    else button.classList.toggle("is-active", Number(key) === info.count);
+  });
+}
+
 function openImageModal(mode) {
   imageModalMode = mode === "replace" ? "replace" : "add";
   const modal = document.getElementById("image-modal");
@@ -1926,6 +1946,29 @@ document.getElementById("column-tools").addEventListener("click", (event) => {
   const info = PackEditor.columnsInfo();
   if (info) syncColumnTools(info);
   setStatus(info && info.count > 1 ? `${info.count} columns` : "Section is one column again", "ok");
+});
+
+document.getElementById("tab-tools").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-tabs]");
+  if (!button) return;
+  const key = button.dataset.tabs;
+  let ok = false;
+  if (key === "add") ok = PackEditor.addTab();
+  else if (key === "remove") ok = PackEditor.removeTab();
+  else ok = PackEditor.setTabCount(key);
+  if (!ok) {
+    setStatus("Click a tab section first, then add or remove tabs", "error");
+    return;
+  }
+  const info = PackEditor.tabsInfo();
+  if (info) syncTabTools(info);
+  const title = document.getElementById("tab-title");
+  if (info && title) title.value = info.title;
+  setStatus(`${info?.count || 2} tabs`, "ok");
+});
+
+document.getElementById("tab-title").addEventListener("input", (event) => {
+  PackEditor.setTabTitle(event.target.value);
 });
 
 document.getElementById("image-tools").addEventListener("click", (event) => {

@@ -676,7 +676,8 @@ h2.section:first-child {
 }
 
 #code-title,
-#image-alt-edit {
+#image-alt-edit,
+#tab-title {
   width: 10em;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1770,6 +1771,14 @@ h2.section:first-child {
   margin-bottom: 0;
 }
 
+.flow-actor .flow-row + .flow-row {
+  margin-top: 6px;
+}
+
+.flow-actor input[data-afield="role"] {
+  flex: 1 1 100%;
+}
+
 .flow-actor input[data-afield="logo"] {
   flex: 0 1 110px;
 }
@@ -1834,6 +1843,11 @@ h2.section:first-child {
   background: #404C37;
 }
 
+.flow-toolbar label.flow-summary input {
+  min-width: 220px;
+  width: 280px;
+}
+
 .flow-show-fields {
   display: flex;
   align-items: center;
@@ -1849,6 +1863,46 @@ h2.section:first-child {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed var(--border);
+}
+
+.flow-branch-card {
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #faf9f6;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.flow-branch-card:last-of-type {
+  margin-bottom: 0;
+}
+
+.flow-branch-card .flow-row + .flow-row {
+  margin-top: 6px;
+}
+
+.flow-branch-card input[data-bfield="label"] {
+  flex: 0 1 88px;
+}
+
+.flow-branch-card input[data-bfield="detail"] {
+  flex: 1 1 160px;
+}
+
+.flow-branch-card input[data-bfield="path"] {
+  flex: 1 1 140px;
+}
+
+.flow-branch-card input[data-bfield="status"] {
+  flex: 0 1 72px;
+}
+
+.flow-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 0.8rem;
 }
 
 .flow-branch-row input[data-bfield="label"] {

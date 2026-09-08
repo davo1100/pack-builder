@@ -683,10 +683,10 @@ li {
 
 .pack-flow {
   position: relative;
-  background: var(--cream);
+  background: #F5F3FB;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 22px;
+  padding: 0;
   margin: 16px 0 8px;
   overflow-x: auto;
   text-align: left;
@@ -741,6 +741,118 @@ li {
   display: block;
 }
 
+.pack-tabs {
+  --tabs-accent: var(--eden-magenta);
+  margin: 16px 0 8px;
+}
+
+.pack-tab-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pack-tabs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+  margin: 0;
+  padding: 0 12px;
+  border-bottom: 2px solid var(--tabs-accent);
+}
+
+.pack-tab {
+  --tab-accent: var(--taupe);
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  bottom: -2px;
+  z-index: 0;
+  font: 700 12px Arial, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 11px 18px 10px;
+  border: 2px solid transparent;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--cream);
+  color: var(--olive);
+  cursor: pointer;
+  box-shadow: inset 0 4px 0 var(--tab-accent);
+}
+
+.pack-tab:nth-child(1) {
+  --tab-accent: var(--eden-magenta);
+  background: var(--peach);
+}
+
+.pack-tab:nth-child(2) {
+  --tab-accent: var(--violet);
+  background: var(--lavender);
+}
+
+.pack-tab:nth-child(3) {
+  --tab-accent: var(--olive);
+  background: var(--lime-wash);
+}
+
+.pack-tab:nth-child(4) {
+  --tab-accent: var(--mustard);
+  background: var(--lemon);
+}
+
+.pack-tab:nth-child(5) {
+  --tab-accent: var(--lime);
+  background: #e8f6e6;
+}
+
+.pack-tab:nth-child(6) {
+  --tab-accent: var(--plum);
+  background: #f6e8ee;
+}
+
+.pack-tab:has(:checked) {
+  z-index: 1;
+  background: var(--white);
+  color: var(--charcoal);
+  border-color: var(--tab-accent);
+  box-shadow: inset 0 4px 0 var(--tab-accent);
+}
+
+.pack-tab:focus-within {
+  outline: 2px solid var(--tab-accent);
+  outline-offset: 2px;
+}
+
+.pack-tabs:has(.pack-tab:nth-child(1) :checked) { --tabs-accent: var(--eden-magenta); }
+.pack-tabs:has(.pack-tab:nth-child(2) :checked) { --tabs-accent: var(--violet); }
+.pack-tabs:has(.pack-tab:nth-child(3) :checked) { --tabs-accent: var(--olive); }
+.pack-tabs:has(.pack-tab:nth-child(4) :checked) { --tabs-accent: var(--mustard); }
+.pack-tabs:has(.pack-tab:nth-child(5) :checked) { --tabs-accent: var(--lime); }
+.pack-tabs:has(.pack-tab:nth-child(6) :checked) { --tabs-accent: var(--plum); }
+
+.pack-tab-panel {
+  display: none;
+  min-height: 4.5em;
+  padding: 20px 22px 18px;
+  background: var(--white);
+  border: 2px solid var(--tabs-accent);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+}
+
+.pack-tabs:has(.pack-tab-radio[value="0"]:checked) .pack-tab-panel[data-tab="0"],
+.pack-tabs:has(.pack-tab-radio[value="1"]:checked) .pack-tab-panel[data-tab="1"],
+.pack-tabs:has(.pack-tab-radio[value="2"]:checked) .pack-tab-panel[data-tab="2"],
+.pack-tabs:has(.pack-tab-radio[value="3"]:checked) .pack-tab-panel[data-tab="3"],
+.pack-tabs:has(.pack-tab-radio[value="4"]:checked) .pack-tab-panel[data-tab="4"],
+.pack-tabs:has(.pack-tab-radio[value="5"]:checked) .pack-tab-panel[data-tab="5"] {
+  display: block;
+}
+
 .pack-flow svg {
   display: block;
   margin: 0;
@@ -784,7 +896,9 @@ li {
 }
 
 .pack-flow-tabs,
-.pack-flow-tab {
+.pack-flow-tab,
+.pack-tabs-bar,
+.pack-tab {
   cursor: pointer;
 }
 
@@ -1545,5 +1659,16 @@ h3 .pack-icon,
 
   a {
     color: var(--charcoal);
+  }
+
+  .pack-tab-panel {
+    display: block !important;
+    break-inside: avoid;
+    margin-top: 8px;
+  }
+
+  .pack-tabs {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

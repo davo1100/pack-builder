@@ -12,8 +12,6 @@ const FlowIR = {
   },
   AUDIENCES: ["developer", "ops", "process"],
   VIEWERS: [
-    { key: "process", label: "Business process" },
-    { key: "ops", label: "Ops" },
     { key: "developer", label: "Developer" },
   ],
   LAYOUTS: ["sequence", "architecture"],
@@ -34,6 +32,22 @@ const FlowIR = {
     chopin: "Card platform",
     platform: "Card platform",
   },
+  DEFAULT_ACTOR_ROLES: {
+    client: "YOUR INTEGRATION",
+    platform: "PLATFORM API",
+    internal: "INTERNAL API",
+    process: "CORPORATE CUSTOMER",
+    external: "EXTERNAL PARTY",
+  },
+
+  defaultActorRole(type) {
+    return this.DEFAULT_ACTOR_ROLES[type] || String(type || "").toUpperCase();
+  },
+
+  actorRole(actor) {
+    const custom = String(actor?.role || actor?.subtitle || "").trim();
+    return custom || this.defaultActorRole(actor?.type);
+  },
 
   uid(prefix) {
     return (prefix || "f") + Math.random().toString(36).slice(2, 8);
@@ -53,6 +67,8 @@ const FlowIR = {
         platform: "darwin",
         hidden: [],
         showFields: true,
+        summary: "",
+        outcome: "",
       },
     };
   },
@@ -144,6 +160,19 @@ const FlowIR = {
       platform: this.PLATFORMS.includes(pres.platform) ? pres.platform : "darwin",
       hidden: Array.isArray(pres.hidden) ? pres.hidden.map(String) : [],
       showFields: pres.showFields !== false,
+      summary: String(pres.summary || next.summary || ""),
+      outcome: String(pres.outcome || ""),
+      outcomeDetail: String(pres.outcomeDetail || ""),
+      tags: Array.isArray(pres.tags) ? pres.tags.map(String).filter(Boolean).slice(0, 8) : [],
+      nextSteps: Array.isArray(pres.nextSteps)
+        ? pres.nextSteps
+            .slice(0, 4)
+            .map((item) => {
+              if (typeof item === "string") return { title: item, detail: "" };
+              return { title: String(item?.title || ""), detail: String(item?.detail || item?.description || "") };
+            })
+            .filter((item) => item.title)
+        : [],
     };
     const actorColors = this._normalizeActorColors(pres.actorColors);
     if (actorColors) next.presentation.actorColors = actorColors;
@@ -153,6 +182,8 @@ const FlowIR = {
         name: String(actor?.name || `Actor ${index + 1}`),
         type: this.ACTOR_TYPES.includes(actor?.type) ? actor.type : "internal",
       };
+      const role = String(actor?.role || actor?.subtitle || "").trim();
+      if (role) nextActor.role = role;
       const logo = this.safeLogo(actor?.logo);
       if (logo) nextActor.logo = logo;
       return nextActor;
@@ -220,19 +251,38 @@ const FlowIR = {
 
   defaultBranches() {
     return [
-      { id: this.uid("b"), label: "Yes", when: "true", target: "" },
-      { id: this.uid("b"), label: "No", when: "false", target: "" },
+      { id: this.uid("b"), label: "Yes", when: "true", target: "", detail: "", ends: false },
+      { id: this.uid("b"), label: "No", when: "false", target: "", detail: "", ends: true },
     ];
   },
 
   _normalizeBranch(branch, index) {
     const fallback = index === 0 ? "Yes" : index === 1 ? "No" : `Path ${index + 1}`;
-    return {
+    const next = {
       id: String(branch?.id || this.uid("b")),
       label: String(branch?.label || branch?.condition || fallback).trim() || fallback,
       target: branch?.target ? String(branch.target) : "",
       when: branch?.when != null && branch.when !== "" ? String(branch.when) : "",
     };
+    const detail = String(branch?.detail || branch?.action || branch?.description || "").trim();
+    if (detail) next.detail = detail;
+    const method = String(branch?.method || "").trim().toUpperCase();
+    if (method && (this.METHODS.includes(method) || method === "SOAP")) next.method = method;
+    const path = String(branch?.path || branch?.operation || "").trim();
+    if (path) next.path = path;
+    if (branch?.status != null && branch.status !== "") {
+      const status = Number(branch.status);
+      next.status = Number.isFinite(status) ? status : String(branch.status);
+    }
+    if (branch?.ends === true || branch?.ends === "true" || branch?.end === true) next.ends = true;
+    return next;
+  },
+
+  branchTone(branch, index) {
+    const label = String(branch?.label || "").trim().toLowerCase();
+    if (/^(yes|y|true|ok|success|pass|continue)/i.test(label)) return "yes";
+    if (/^(no|n|false|fail|error|end|stop|rollback)/i.test(label)) return "no";
+    return index === 0 ? "yes" : index === 1 ? "no" : index % 2 === 0 ? "yes" : "no";
   },
 
   conditionKindLabel(kind) {
@@ -498,7 +548,8 @@ const FlowIR = {
       next.fieldChips = [];
     } else {
       next.caption = this._developerCaption(next, platform);
-      next.fieldChips = pres.audience === "developer" && pres.showFields !== false ? this.fieldChips(step.fields, "developer") : [];
+      next.fieldRows = pres.audience === "developer" && pres.showFields !== false ? this.fieldRows(step.fields) : [];
+      next.fieldChips = this.fieldChips(step.fields, "developer");
     }
     if (step.type === "process") {
       next.subtitle = pres.audience === "process" ? "" : step.subtitle || "";
@@ -519,27 +570,34 @@ const FlowIR = {
       const next = this._normalizeBranch(branch, index);
       const target = src.steps.find((item) => item.id === next.target);
       next.targetLabel = target ? this._plainAction(target) || target.label : "";
+      next.tone = this.branchTone(next, index);
+      if (!next.detail && next.targetLabel) next.detail = next.targetLabel;
       return next;
     });
   },
 
-  fieldChips(fields, audience) {
+  fieldRows(fields) {
     if (!Array.isArray(fields) || !fields.length) return [];
-    const view = this.audienceOf(audience);
     return fields
       .filter((field) => field?.name)
-      .slice(0, 8)
-      .map((field) => {
-        const star = field.required ? "*" : "";
-        if (view === "process" || view === "ops") return "";
-        const place = field.in && field.in !== "body" && field.in !== "response" && field.in !== "soap" ? `${field.in} ` : "";
-        const type = field.type ? `:${field.type}` : "";
-        const example = field.example
-          ? `${field.type ? " =" : ":"} ${this._shortExample(field.example)}`
-          : "";
-        return `${place}${field.name}${star}${type}${example}`;
-      })
-      .filter(Boolean);
+      .slice(0, 10)
+      .map((field) => ({
+        name: String(field.name),
+        type: field.type ? String(field.type) : "",
+        example: field.example ? this._shortExample(field.example) : "",
+        required: field.required !== false && field.required !== "false",
+      }));
+  },
+
+  fieldChips(fields, audience) {
+    const view = this.audienceOf(audience);
+    if (view === "process" || view === "ops") return [];
+    return this.fieldRows(fields).map((row) => {
+      const star = row.required ? "*" : "";
+      const type = row.type ? `:${row.type}` : "";
+      const example = row.example ? ` = ${row.example}` : "";
+      return `${row.name}${star}${type}${example}`;
+    });
   },
 
   _developerCaption(step, platform) {

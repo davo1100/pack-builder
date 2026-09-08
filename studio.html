@@ -211,6 +211,7 @@
               <button type="button" data-insert="hero">Header</button>
               <button type="button" data-insert="card">Section</button>
               <button type="button" data-insert="columns">Columns</button>
+              <button type="button" data-insert="tabs">Tabs</button>
               <p class="insert-heading">Writing</p>
               <button type="button" data-insert="paragraph">Paragraph</button>
               <button type="button" data-insert="heading">Heading</button>
@@ -239,6 +240,17 @@
             </div>
             <button type="button" data-columns="add">+ Column</button>
             <button type="button" data-columns="remove">− Column</button>
+          </div>
+          <div class="tool-group tool-context" id="tab-tools" hidden>
+            <span class="toolbar-label">Tabs</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-tabs="2">2</button>
+              <button type="button" data-tabs="3">3</button>
+              <button type="button" data-tabs="4">4</button>
+            </div>
+            <button type="button" data-tabs="add">+ Tab</button>
+            <button type="button" data-tabs="remove">− Tab</button>
+            <input id="tab-title" type="text" placeholder="Tab name" maxlength="40">
           </div>
           <div class="tool-group tool-context" id="table-tools" hidden>
             <span class="toolbar-label">Table</span>
@@ -431,7 +443,7 @@
       <header class="flow-head">
         <div>
           <strong>Flow Studio</strong>
-          <span>Describe the call. The compiler draws it. Nothing is invented.</span>
+          <span>Describe the call. The compiler draws the developer API flow. Nothing is invented.</span>
         </div>
         <div class="studio-actions">
           <button class="btn" type="button" id="flow-download">Download SVG</button>
@@ -442,6 +454,7 @@
       <p id="flow-errors" class="flow-banner" hidden></p>
       <div class="flow-toolbar">
         <label>Title <input id="flow-title" type="text"></label>
+        <label class="flow-summary">Description <input id="flow-summary" type="text" placeholder="What this integration does"></label>
         <label>Layout
           <select id="flow-layout">
             <option value="sequence">Sequence</option>
@@ -565,14 +578,14 @@
   <script src="js/icons.js"></script>
   <script src="js/syntax.js"></script>
   <script src="js/pack-html.js?v=insert-html3"></script>
-  <script src="js/editor.js?v=insert-html3"></script>
+  <script src="js/editor.js?v=tabs-brand1"></script>
   <script src="js/diagram.js"></script>
-  <script src="js/flow-ir.js?v=seq-import15"></script>
+  <script src="js/flow-ir.js?v=flow-sheet6"></script>
   <script src="js/flow-parse.js?v=wsdl-xml3"></script>
   <script src="js/flow-image.js?v=seq-import15"></script>
-  <script src="js/flow-render.js?v=flow-tabs1"></script>
-  <script src="js/flow-studio.js?v=flow-tabs1"></script>
+  <script src="js/flow-render.js?v=flow-sheet6"></script>
+  <script src="js/flow-studio.js?v=flow-sheet6"></script>
   <script src="js/pack-lang.js?v=lang4"></script>
-  <script src="js/studio.js?v=insert-html3"></script>
+  <script src="js/studio.js?v=flow-sheet1"></script>
 </body>
 </html>

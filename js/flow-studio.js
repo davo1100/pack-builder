@@ -94,11 +94,12 @@ const FlowStudio = {
     document.getElementById("flow-source-box")?.addEventListener("toggle", () => this._onSourceToggle());
     document.getElementById("flow-import-toggle")?.addEventListener("click", () => this._toggleImport());
     document.getElementById("flow-import-close")?.addEventListener("click", () => this._toggleImport(false));
-    document.getElementById("flow-preview").addEventListener("change", (event) => {
-      if (event.target.classList.contains("pack-flow-radio")) this._paintVisiblePreview();
-    });
     document.getElementById("flow-title").addEventListener("input", (event) => {
       this.model.title = event.target.value;
+      this._schedulePreview();
+    });
+    document.getElementById("flow-summary").addEventListener("input", (event) => {
+      this.model.presentation.summary = event.target.value;
       this._schedulePreview();
     });
     document.getElementById("flow-layout").addEventListener("change", (event) => {
@@ -207,6 +208,7 @@ const FlowStudio = {
   _renderAll() {
     this._syncing = true;
     document.getElementById("flow-title").value = this.model.title || "";
+    document.getElementById("flow-summary").value = this.model.presentation.summary || "";
     document.getElementById("flow-layout").value = this.model.presentation.layout;
     document.getElementById("flow-platform").value = this.model.presentation.platform;
     document.getElementById("flow-show-fields").checked = this.model.presentation.showFields !== false;
@@ -217,7 +219,6 @@ const FlowStudio = {
     this._renderSteps();
     this._renderEndpointPicker();
     this._syncProtocolChrome();
-    this._ensurePreviewShell();
     this._syncing = false;
     this._paintVisiblePreview();
   },
@@ -242,34 +243,18 @@ const FlowStudio = {
     });
   },
 
-  _ensurePreviewShell() {
-    const host = document.getElementById("flow-preview");
-    if (host.querySelector(".pack-flow")) return host;
-    this._previewId = this._previewId || FlowRender.uid("pf");
-    const id = this._previewId;
-    const preferred = FlowIR.audienceOf(this.model?.presentation?.audience);
-    const tabs = `<div class="pack-flow-tabs" role="tablist">${FlowIR.VIEWERS.map((view) => {
-      const checked = view.key === preferred ? " checked" : "";
-      return `<label class="pack-flow-tab"><input class="pack-flow-radio" type="radio" name="${id}" value="${view.key}"${checked}>${this._esc(view.label)}</label>`;
-    }).join("")}</div>`;
-    const panels = FlowIR.VIEWERS.map((view) => `<div class="pack-flow-panel" data-view="${view.key}"></div>`).join("");
-    host.innerHTML = `<div class="pack-flow">${tabs}${panels}</div>`;
-    return host;
-  },
-
   _paintVisiblePreview() {
     if (!this.model) return;
-    const host = this._ensurePreviewShell();
-    const selected = host.querySelector(".pack-flow-radio:checked")?.value || "process";
-    const drawn = FlowRender.svg(FlowRender.viewModel(this.model, selected), { trusted: true });
-    const panel = host.querySelector(`.pack-flow-panel[data-view="${selected}"]`);
+    const host = document.getElementById("flow-preview");
+    if (!host) return;
+    const drawn = FlowRender.svg(FlowRender.viewModel(this.model, "developer"), { trusted: true });
     if (!drawn.ok) {
       this._errors(drawn.errors);
-      if (panel) panel.innerHTML = `<p class="flow-error">${this._esc(drawn.errors.join(" · "))}</p>`;
+      host.innerHTML = `<p class="flow-error">${this._esc(drawn.errors.join(" · "))}</p>`;
       return;
     }
     this._errors([]);
-    if (panel) panel.innerHTML = drawn.svg;
+    host.innerHTML = `<div class="pack-flow">${drawn.svg}</div>`;
   },
 
   _rememberCatalogs(model) {
@@ -371,6 +356,7 @@ const FlowStudio = {
     this._rememberCatalogs(this.model);
     this._syncing = true;
     document.getElementById("flow-title").value = this.model.title || "";
+    document.getElementById("flow-summary").value = this.model.presentation.summary || "";
     document.getElementById("flow-layout").value = this.model.presentation.layout;
     document.getElementById("flow-platform").value = this.model.presentation.platform;
     document.getElementById("flow-show-fields").checked = this.model.presentation.showFields !== false;
@@ -657,6 +643,9 @@ const FlowStudio = {
             ${actor.logo ? `<button type="button" data-alogo-clear>Clear</button>` : ""}
             <button type="button" data-aremove>Remove</button>
           </div>
+          <div class="flow-row">
+            <input data-afield="role" value="${this._esc(actor.role || "")}" placeholder="${this._esc(FlowIR.defaultActorRole(actor.type))}" aria-label="Actor subheading">
+          </div>
         </div>`;
       })
       .join("");
@@ -786,13 +775,27 @@ const FlowStudio = {
           .filter((item) => item.id !== step.id)
           .map((item) => `<option value="${this._esc(item.id)}"${item.id === branch.target ? " selected" : ""}>${this._esc(this._stepChoiceLabel(item))}</option>`)
           .join("");
-        return `<div class="flow-row flow-branch-row" data-bindex="${index}">
-          <input data-bfield="label" value="${this._esc(branch.label || "")}" placeholder="Yes">
-          <select data-bfield="target" aria-label="Goes to">
-            <option value="">Choose a step</option>
-            ${targets}
-          </select>
-          <button type="button" data-bremove>Remove</button>
+        const methodSelect = ["", ...FlowIR.METHODS]
+          .map((method) => `<option value="${method}"${(branch.method || "") === method ? " selected" : ""}>${method || "—"}</option>`)
+          .join("");
+        return `<div class="flow-branch-card" data-bindex="${index}">
+          <div class="flow-row">
+            <input data-bfield="label" value="${this._esc(branch.label || "")}" placeholder="Yes" aria-label="Outcome label">
+            <input data-bfield="detail" value="${this._esc(branch.detail || "")}" placeholder="What happens on this path" aria-label="Outcome detail">
+            <button type="button" data-bremove>Remove</button>
+          </div>
+          <div class="flow-row">
+            <select data-bfield="method" aria-label="Outcome method">${methodSelect}</select>
+            <input data-bfield="path" value="${this._esc(branch.path || "")}" placeholder="/path or operation" aria-label="Outcome path">
+            <input data-bfield="status" value="${branch.status != null ? this._esc(branch.status) : ""}" placeholder="Status" inputmode="numeric" aria-label="Outcome status">
+            <label class="flow-inline-check"><input type="checkbox" data-bfield="ends"${branch.ends ? " checked" : ""}> Flow ends</label>
+          </div>
+          <div class="flow-row">
+            <select data-bfield="target" aria-label="Linked step">
+              <option value="">No linked step</option>
+              ${targets}
+            </select>
+          </div>
         </div>`;
       })
       .join("");
@@ -802,7 +805,7 @@ const FlowStudio = {
         <button type="button" data-add-branch>Add outcome</button>
       </div>
       ${rows}
-      <p class="flow-filter-note">Each option goes to a step. Those steps sit under the diamond.</p>
+      <p class="flow-filter-note">Yes paths usually continue below. No paths can show a rollback call and end the flow.</p>
     </div>`;
   },
 
@@ -933,7 +936,16 @@ const FlowStudio = {
     }
     const field = event.target.dataset.afield;
     if (field === "name") actor.name = event.target.value;
-    if (field === "type") actor.type = event.target.value;
+    if (field === "type") {
+      actor.type = event.target.value;
+      const roleInput = row.querySelector('input[data-afield="role"]');
+      if (roleInput) roleInput.placeholder = FlowIR.defaultActorRole(actor.type);
+    }
+    if (field === "role") {
+      const role = String(event.target.value || "").trim();
+      if (role) actor.role = role;
+      else delete actor.role;
+    }
     if (field === "logo") {
       const logo = FlowIR.safeLogo(event.target.value);
       if (logo) actor.logo = logo;
@@ -1138,8 +1150,33 @@ const FlowStudio = {
     step.branches = step.branches || FlowIR.defaultBranches();
     if (!step.branches[index]) step.branches[index] = { id: FlowIR.uid("b"), label: "", target: "", when: "" };
     const key = input.dataset.bfield;
-    const value = input.value;
+    const value = input.type === "checkbox" ? input.checked : input.value;
     if (key === "label") step.branches[index].label = value;
+    if (key === "detail") {
+      const text = String(value || "").trim();
+      if (text) step.branches[index].detail = text;
+      else delete step.branches[index].detail;
+    }
+    if (key === "method") {
+      if (value) step.branches[index].method = value;
+      else delete step.branches[index].method;
+    }
+    if (key === "path") {
+      const text = String(value || "").trim();
+      if (text) step.branches[index].path = text;
+      else delete step.branches[index].path;
+    }
+    if (key === "status") {
+      if (value === "" || value == null) delete step.branches[index].status;
+      else {
+        const num = Number(value);
+        step.branches[index].status = Number.isFinite(num) ? num : value;
+      }
+    }
+    if (key === "ends") {
+      if (value) step.branches[index].ends = true;
+      else delete step.branches[index].ends;
+    }
     if (key === "target") step.branches[index].target = value;
   },
 
@@ -1148,7 +1185,7 @@ const FlowStudio = {
     const step = this.model.steps.find((item) => item.id === card?.dataset.step);
     if (event.target.closest("[data-add-branch]") && step) {
       step.branches = step.branches || FlowIR.defaultBranches();
-      step.branches.push({ id: FlowIR.uid("b"), label: `Path ${step.branches.length + 1}`, target: this._nextConditionTarget(step), when: "" });
+      step.branches.push({ id: FlowIR.uid("b"), label: `Path ${step.branches.length + 1}`, target: this._nextConditionTarget(step), when: "", ends: false });
       this._renderSteps();
       this._afterStructure();
       return;

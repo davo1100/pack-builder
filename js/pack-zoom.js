@@ -33,7 +33,7 @@
   let pinch = 0;
 
   function sourceOf(event) {
-    if (event.target.closest(".pack-zoom, .pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, a, button, summary")) {
+    if (event.target.closest(".pack-zoom, .pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, .pack-tab, .pack-tabs-bar, .pack-tab-radio, a, button, summary")) {
       return null;
     }
     return event.target.closest(".pack-image, .diagram-container, .pack-flow");
@@ -127,7 +127,7 @@
   }, { passive: false });
 
   view.addEventListener("pointerdown", (event) => {
-    if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, a, button, summary")) return;
+    if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, .pack-tab, .pack-tabs-bar, .pack-tab-radio, a, button, summary")) return;
     dragging = true;
     dragged = false;
     lastX = event.clientX;
@@ -159,7 +159,7 @@
   view.addEventListener("pointercancel", stopDrag);
 
   view.addEventListener("dblclick", (event) => {
-    if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, a, button, summary")) return;
+    if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, .pack-tab, .pack-tabs-bar, .pack-tab-radio, a, button, summary")) return;
     event.preventDefault();
     if (scale > fitScale * 1.05) fit();
     else zoomTo(scale * 2, event.clientX, event.clientY);

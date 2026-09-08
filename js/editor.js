@@ -11,6 +11,8 @@ const BLOCK_SELECTOR = [
   ".pack-image",
   ".pack-columns",
   ".pack-column",
+  ".pack-tabs",
+  ".pack-tab-panel",
   ".callout",
   ".callout-warning",
   ".checklist-box",
@@ -191,6 +193,13 @@ const PackEditor = {
       border-radius: 8px;
       outline: 1px dashed rgba(126, 109, 226, 0.4);
     }
+    .pack-tabs-bar,
+    .pack-tab {
+      user-select: none;
+    }
+    .pack-tab-panel {
+      min-height: 88px;
+    }
     #edit-root .is-hidden {
       display: block !important;
       opacity: 0.4;
@@ -322,6 +331,10 @@ const PackEditor = {
       const grid = this.selected?.closest?.(".pack-columns");
       if (grid) this._select(grid);
       this._placeHtml(this._snippet("columns"));
+      return;
+    }
+    if (kind === "tabs") {
+      this._placeHtml(this._tabsMarkup(2));
       return;
     }
     const pageLevel = PAGE_LEVEL_KINDS.has(kind);
@@ -665,6 +678,154 @@ const PackEditor = {
     if (n > 1) grid.classList.add(`pack-columns-${n}`);
   },
 
+  tabsFromSelection() {
+    if (this.selected?.matches?.(".pack-tabs")) return this.selected;
+    return this.selected?.closest?.(".pack-tabs") || this.anchor?.closest?.(".pack-tabs") || null;
+  },
+
+  tabsInfo() {
+    const tabs = this.tabsFromSelection();
+    if (!tabs) return null;
+    const panels = [...tabs.querySelectorAll(":scope > .pack-tab-panel")];
+    const checked = tabs.querySelector(".pack-tab-radio:checked");
+    const index = checked ? Number(checked.value) : 0;
+    const label = tabs.querySelectorAll(".pack-tab-name")[index];
+    return {
+      count: panels.length,
+      index: Number.isFinite(index) ? index : 0,
+      title: label ? label.textContent.trim() : "",
+    };
+  },
+
+  _activeTabPanel(tabs) {
+    if (!tabs) return null;
+    const checked = tabs.querySelector(".pack-tab-radio:checked");
+    const index = checked ? checked.value : "0";
+    return tabs.querySelector(`:scope > .pack-tab-panel[data-tab="${index}"]`)
+      || tabs.querySelector(":scope > .pack-tab-panel");
+  },
+
+  _tabPlaceholder(panel) {
+    const text = panel?.textContent.trim() || "";
+    return !text || text === "Add copy here.";
+  },
+
+  _tabsMarkup(count, titles) {
+    const n = Math.max(2, Math.min(6, count || 2));
+    const name = "pt" + Math.random().toString(36).slice(2, 8);
+    const labels = [];
+    const panels = [];
+    for (let i = 0; i < n; i += 1) {
+      const title = this._escTabName(titles?.[i] || `Tab ${i + 1}`);
+      const checked = i === 0 ? " checked" : "";
+      labels.push(`<label class="pack-tab"><input class="pack-tab-radio" type="radio" name="${name}" value="${i}"${checked}><span class="pack-tab-name">${title}</span></label>`);
+      panels.push(`<div class="pack-tab-panel" data-tab="${i}"><p>Add copy here.</p></div>`);
+    }
+    return `<div class="pack-tabs"><div class="pack-tabs-bar" role="tablist">${labels.join("")}</div>${panels.join("")}</div>`;
+  },
+
+  _escTabName(text) {
+    return String(text || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  },
+
+  _syncTabRadios(tabs) {
+    if (!tabs) return;
+    const name = "pt" + Math.random().toString(36).slice(2, 8);
+    const radios = [...tabs.querySelectorAll(".pack-tab-radio")];
+    const panels = [...tabs.querySelectorAll(":scope > .pack-tab-panel")];
+    radios.forEach((radio, i) => {
+      radio.name = name;
+      radio.value = String(i);
+    });
+    panels.forEach((panel, i) => panel.setAttribute("data-tab", String(i)));
+  },
+
+  _uniqTabRadios(tabs, root) {
+    if (!tabs) return;
+    const first = tabs.querySelector(".pack-tab-radio");
+    const name = first?.getAttribute("name") || "";
+    const clash = name && [...(root || this.root())?.querySelectorAll(".pack-tabs") || []].some((other) => {
+      if (other === tabs) return false;
+      return other.querySelector(".pack-tab-radio")?.getAttribute("name") === name;
+    });
+    if (!name || clash) this._syncTabRadios(tabs);
+    else {
+      [...tabs.querySelectorAll(".pack-tab-radio")].forEach((radio, i) => { radio.value = String(i); });
+      [...tabs.querySelectorAll(":scope > .pack-tab-panel")].forEach((panel, i) => panel.setAttribute("data-tab", String(i)));
+    }
+  },
+
+  setTabCount(count) {
+    const tabs = this.tabsFromSelection();
+    if (!tabs) return false;
+    const n = Math.max(2, Math.min(6, Math.round(Number(count) || 2)));
+    const bar = tabs.querySelector(".pack-tabs-bar");
+    const doc = this.doc();
+    if (!bar || !doc) return false;
+    let labels = [...bar.querySelectorAll(":scope > .pack-tab")];
+    let panels = [...tabs.querySelectorAll(":scope > .pack-tab-panel")];
+    while (labels.length < n) {
+      const i = labels.length;
+      const label = doc.createElement("label");
+      label.className = "pack-tab";
+      label.innerHTML = `<input class="pack-tab-radio" type="radio" value="${i}"><span class="pack-tab-name">Tab ${i + 1}</span>`;
+      bar.appendChild(label);
+      labels.push(label);
+      const panel = doc.createElement("div");
+      panel.className = "pack-tab-panel";
+      panel.setAttribute("data-tab", String(i));
+      panel.innerHTML = "<p>Add copy here.</p>";
+      tabs.appendChild(panel);
+      panels.push(panel);
+    }
+    while (labels.length > n) {
+      const lastLabel = labels.pop();
+      const lastPanel = panels.pop();
+      if (lastPanel && !this._tabPlaceholder(lastPanel) && panels.length) {
+        const prev = panels[panels.length - 1];
+        while (lastPanel.firstChild) prev.appendChild(lastPanel.firstChild);
+      }
+      lastLabel?.remove();
+      lastPanel?.remove();
+    }
+    this._syncTabRadios(tabs);
+    const radios = [...tabs.querySelectorAll(".pack-tab-radio")];
+    const last = radios[radios.length - 1];
+    if (last) last.checked = true;
+    this._prepare();
+    const active = this._activeTabPanel(tabs);
+    this._select(active || tabs);
+    this._changed();
+    return true;
+  },
+
+  addTab() {
+    const info = this.tabsInfo();
+    if (!info || info.count >= 6) return false;
+    return this.setTabCount(info.count + 1);
+  },
+
+  removeTab() {
+    const info = this.tabsInfo();
+    if (!info || info.count <= 2) return false;
+    return this.setTabCount(info.count - 1);
+  },
+
+  setTabTitle(title) {
+    const tabs = this.tabsFromSelection();
+    const info = this.tabsInfo();
+    if (!tabs || !info) return false;
+    const name = tabs.querySelectorAll(".pack-tab-name")[info.index];
+    if (!name) return false;
+    const next = String(title || "").trim() || `Tab ${info.index + 1}`;
+    name.textContent = next;
+    this._changed();
+    return true;
+  },
+
   _icon(name, size) {
     return typeof IconLibrary !== "undefined" ? IconLibrary.html(name, size) : "";
   },
@@ -738,6 +899,17 @@ const PackEditor = {
 
   _insertContainer() {
     const selected = this.selected;
+    const fromTab = selected?.matches?.(".pack-tab-panel")
+      ? selected
+      : selected?.closest?.(".pack-tab-panel") || this.anchor?.closest?.(".pack-tab-panel");
+    if (fromTab) return fromTab;
+    const tabsHost = selected?.matches?.(".pack-tabs")
+      ? selected
+      : selected?.closest?.(".pack-tabs") || this.anchor?.closest?.(".pack-tabs");
+    if (tabsHost) {
+      const active = this._activeTabPanel(tabsHost);
+      if (active) return active;
+    }
     if (selected?.matches?.(".pack-column")) return selected;
     const fromColumn = selected?.closest?.(".pack-column") || this.anchor?.closest?.(".pack-column");
     if (fromColumn) return fromColumn;
@@ -916,14 +1088,22 @@ const PackEditor = {
       const copy = block.cloneNode(true);
       copy.classList.remove("is-selected");
       block.after(copy);
+      if (copy.matches?.(".pack-tabs")) this._syncTabRadios(copy);
     } else if (action === "delete") {
       if (!this.doc().defaultView.confirm("Delete this block?")) return false;
       const parent = block.parentNode;
       const parentGrid = block.matches(".pack-column") ? block.parentElement : null;
+      const parentTabs = block.matches(".pack-tab-panel") ? block.closest(".pack-tabs") : null;
+      const tabIndex = block.matches(".pack-tab-panel") ? block.getAttribute("data-tab") : null;
       block.remove();
       if (parentGrid) {
         if (!parentGrid.querySelector(":scope > .pack-column")) parentGrid.remove();
         else this._syncColumnVar(parentGrid);
+      }
+      if (parentTabs) {
+        [...parentTabs.querySelectorAll(".pack-tab")].find((el) => el.querySelector("input")?.value === tabIndex)?.remove();
+        this._syncTabRadios(parentTabs);
+        if (!parentTabs.querySelector(":scope > .pack-tab-panel")) parentTabs.remove();
       }
       this.selected = parent?.querySelector(BLOCK_SELECTOR)
         || (parent?.matches?.(BLOCK_SELECTOR) ? parent : null);
@@ -983,6 +1163,7 @@ const PackEditor = {
     root.setAttribute("contenteditable", "true");
     this._wrapLooseImages();
     this._markFlowCandidates();
+    root.querySelectorAll(".pack-tabs").forEach((tabs) => this._uniqTabRadios(tabs, root));
     root.querySelectorAll(BLOCK_SELECTOR).forEach((el) => el.setAttribute("data-layout-block", "true"));
     root.querySelectorAll(".pack-image").forEach((figure) => {
       figure.setAttribute("contenteditable", "false");
@@ -992,6 +1173,12 @@ const PackEditor = {
         handle.setAttribute("contenteditable", "false");
         figure.appendChild(handle);
       }
+    });
+    root.querySelectorAll(".pack-tabs-bar, .pack-tab").forEach((el) => {
+      el.setAttribute("contenteditable", "false");
+    });
+    root.querySelectorAll(".pack-tab-panel").forEach((el) => {
+      el.setAttribute("contenteditable", "true");
     });
     root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow, .pack-html").forEach((el) => {
       const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow, .pack-html") || el;
@@ -1023,7 +1210,7 @@ const PackEditor = {
       root.addEventListener("click", (event) => this._onClick(event));
       root.addEventListener("keyup", () => this._changed());
       root.addEventListener("input", (event) => {
-        if (event.target.closest(".pack-flow-radio, .pack-flow-tabs")) return;
+        if (event.target.closest(".pack-flow-radio, .pack-flow-tabs, .pack-tab-radio, .pack-tabs-bar")) return;
         this._changed();
       });
       root.addEventListener("paste", (event) => this._onPaste(event));
@@ -1040,7 +1227,7 @@ const PackEditor = {
       });
       root.addEventListener("dblclick", (event) => {
         const flow = event.target.closest(".pack-flow");
-        if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio")) return;
+        if (event.target.closest(".pack-flow-tab, .pack-flow-tabs, .pack-flow-radio, .pack-tab, .pack-tabs-bar, .pack-tab-radio")) return;
         if (flow && (flow.hasAttribute("data-flow") || flow.querySelector("svg"))) {
           event.preventDefault();
           this.lastFlow = flow;
@@ -1123,6 +1310,11 @@ const PackEditor = {
     if (diagram) this.lastDiagram = diagram;
     const flow = event.target.closest(".pack-flow");
     if (flow) this.lastFlow = flow;
+    const tab = event.target.closest(".pack-tab");
+    if (tab) {
+      const radio = tab.querySelector(".pack-tab-radio");
+      if (radio && !radio.checked) radio.checked = true;
+    }
     const code = event.target.closest(".code-fold, .code-container");
     if (code) this.lastCode = code;
     const locked = event.target.closest("[data-protected]");
@@ -1215,6 +1407,8 @@ const PackEditor = {
     if (el.matches(".api-box")) return "API box";
     if (el.matches(".pack-columns")) return "Columns";
     if (el.matches(".pack-column, .pack-column *")) return "Column";
+    if (el.matches(".pack-tabs, .pack-tab, .pack-tabs-bar")) return "Tabs";
+    if (el.matches(".pack-tab-panel, .pack-tab-panel *")) return "Tab";
     if (el.matches(".pack-image, .pack-image *")) return "Image";
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
     if (el.matches(".pack-flow, .pack-flow *")) return "API flow";
