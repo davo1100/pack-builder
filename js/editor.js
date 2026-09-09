@@ -8,6 +8,7 @@ const BLOCK_SELECTOR = [
   ".api-box",
   ".diagram-container",
   ".pack-flow",
+  ".pack-journey",
   ".pack-image",
   ".pack-columns",
   ".pack-column",
@@ -90,7 +91,8 @@ const PackEditor = {
   <style id="theme-override">${themeCss || ""}</style>
   <style>
     body { background: var(--cream, #F2EEE2); }
-    #edit-root { padding: 28px 32px 80px; max-width: 980px; margin: 0 auto; }
+    #edit-root { padding: 28px 32px 80px; max-width: 1600px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+    #edit-root .pack-journey { position: relative; z-index: 1; }
     #edit-root:focus { outline: none; }
     [data-layout-block].is-selected {
       outline: 2px solid #7E6DE2;
@@ -377,22 +379,421 @@ const PackEditor = {
 
   insertHtmlSnippet(raw) {
     const source = String(raw || "").trim();
-    if (!source || !this.root() || typeof PackHtml === "undefined") return false;
+    if (!source || !this.root()) return false;
     if (!this._insertContainer()) return false;
+    const journey = this._journeyFromHtml(source);
+    if (journey) {
+      this._placeHtml(journey, { pageLevel: false });
+      return true;
+    }
+    if (typeof PackHtml === "undefined") return false;
     this._placeElement(this._htmlBlock(source), { pageLevel: false });
     return true;
   },
 
   replaceHtmlSnippet(raw) {
-    const block = this.htmlFromSelection();
     const source = String(raw || "").trim();
-    if (!block || !source || typeof PackHtml === "undefined") return false;
+    if (!source) return false;
+    const journeyHtml = this._journeyFromHtml(source);
+    const journeyBlock = this.journeyFromSelection();
+    if (journeyHtml && journeyBlock) {
+      journeyBlock.outerHTML = journeyHtml;
+      this._prepare();
+      const next = [...(this.root()?.querySelectorAll(".pack-journey") || [])].find((el) => el.isConnected);
+      if (next) this._select(next);
+      this._changed();
+      return true;
+    }
+    if (journeyHtml) {
+      const htmlBlock = this.htmlFromSelection();
+      if (htmlBlock) {
+        htmlBlock.outerHTML = journeyHtml;
+        this._prepare();
+        const next = this.root()?.querySelector(".pack-journey");
+        if (next) this._select(next);
+        this._changed();
+        return true;
+      }
+      if (!this._insertContainer()) return false;
+      this._placeHtml(journeyHtml, { pageLevel: false });
+      return true;
+    }
+    const block = this.htmlFromSelection();
+    if (!block || typeof PackHtml === "undefined") return false;
     block.setAttribute("data-html-src", PackHtml.encode(source));
     block.replaceChildren(this._htmlBlock(source).firstChild);
     this._prepare();
     this._select(block);
     this._changed();
     return true;
+  },
+
+  journeyFromSelection() {
+    if (this.selected?.matches?.(".pack-journey")) return this.selected;
+    return this.selected?.closest?.(".pack-journey") || this.anchor?.closest?.(".pack-journey") || null;
+  },
+
+  journeyInfo() {
+    const journey = this.journeyFromSelection();
+    if (!journey) return null;
+    const steps = [...journey.querySelectorAll(".j-cardrow > .j-step")];
+    const feats = [...journey.querySelectorAll(".j-feats > .j-feat")];
+    return { el: journey, steps: steps.length, feats: feats.length };
+  },
+
+  setJourneySteps(count) {
+    const journey = this.journeyFromSelection();
+    if (!journey) return false;
+    const n = Math.max(2, Math.min(6, Number(count) || 3));
+    const row = journey.querySelector(".j-cardrow");
+    const stepsHost = journey.querySelector(".j-steps");
+    if (!row || !stepsHost) return false;
+    let steps = [...row.querySelectorAll(":scope > .j-step")];
+    while (steps.length < n) {
+      row.insertAdjacentHTML("beforeend", this._journeyStepHtml(steps.length + 1));
+      steps = [...row.querySelectorAll(":scope > .j-step")];
+    }
+    while (steps.length > n) {
+      steps[steps.length - 1].remove();
+      steps = [...row.querySelectorAll(":scope > .j-step")];
+    }
+    stepsHost.style.setProperty("--cols", String(n));
+    this._syncJourneyChrome(journey);
+    this._prepare();
+    this._select(journey);
+    this._changed();
+    if (typeof PackJourney !== "undefined") PackJourney.fit(this.root());
+    return true;
+  },
+
+  addJourneyStep() {
+    const info = this.journeyInfo();
+    if (!info) return false;
+    return this.setJourneySteps(info.steps + 1);
+  },
+
+  removeJourneyStep() {
+    const info = this.journeyInfo();
+    if (!info || info.steps <= 2) return false;
+    return this.setJourneySteps(info.steps - 1);
+  },
+
+  addJourneyFeat() {
+    const journey = this.journeyFromSelection();
+    const feats = journey?.querySelector(".j-feats");
+    if (!feats) return false;
+    if (feats.children.length >= 6) return false;
+    feats.insertAdjacentHTML(
+      "beforeend",
+      `<div class="j-feat"><span class="ft" contenteditable="false"><span class="i" style="width:13px;height:13px">${this._journeyIcon("check")}</span></span><div><b>New highlight</b><p>Short supporting line.</p></div></div>`
+    );
+    feats.style.setProperty("--feat-cols", String(Math.min(4, feats.children.length)));
+    this._prepare();
+    this._select(journey);
+    this._changed();
+    return true;
+  },
+
+  removeJourneyFeat() {
+    const journey = this.journeyFromSelection();
+    const feats = journey?.querySelector(".j-feats");
+    if (!feats || feats.children.length <= 1) return false;
+    feats.lastElementChild?.remove();
+    feats.style.setProperty("--feat-cols", String(Math.min(4, Math.max(1, feats.children.length))));
+    this._prepare();
+    this._select(journey);
+    this._changed();
+    return true;
+  },
+
+  _journeyFromHtml(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return "";
+    const looksLikeJourney =
+      /\bjsheet\b|\bpack-journey\b|\bj-steps\b|\bj-recap\b/i.test(text) ||
+      /\bclass\s*=\s*["']ab["']/i.test(text) ||
+      /\bfit-inner\b/i.test(text);
+    if (!looksLikeJourney) return "";
+    try {
+      const html = /<html[\s>]/i.test(text) || /<!DOCTYPE/i.test(text) ? text : `<div id="pack-journey-wrap">${text}</div>`;
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const sheet = parsed.querySelector(".pack-journey, .jsheet");
+      if (sheet) {
+        sheet.classList.remove("jsheet");
+        sheet.classList.add("pack-journey");
+        sheet.querySelectorAll("script").forEach((node) => node.remove());
+        let wrap = sheet.querySelector(":scope > .pack-journey-sheet");
+        if (!wrap) {
+          wrap = parsed.createElement("div");
+          wrap.className = "pack-journey-sheet";
+          while (sheet.firstChild) wrap.appendChild(sheet.firstChild);
+          sheet.appendChild(wrap);
+        }
+        this._injectJourneyCss(parsed, wrap);
+        const cols = sheet.querySelectorAll(".j-cardrow > .j-step").length;
+        if (cols) sheet.querySelector(".j-steps")?.style.setProperty("--cols", String(cols));
+        const feats = sheet.querySelectorAll(".j-feats > .j-feat").length;
+        if (feats) sheet.querySelector(".j-feats")?.style.setProperty("--feat-cols", String(Math.min(4, feats)));
+        return sheet.outerHTML;
+      }
+      return this._abJourneyFromParsed(parsed);
+    } catch {
+      return "";
+    }
+  },
+
+  _journeyCssFromParsed(parsed) {
+    const raw = [...(parsed?.querySelectorAll?.("style") || [])]
+      .map((node) => String(node.textContent || ""))
+      .join("\n");
+    if (!raw.trim()) return "";
+    return raw
+      .replace(/@font-face\s*\{[^}]*\}/gi, "")
+      .replace(/html\s*,\s*body\s*\{[^}]*\}/gi, "")
+      .replace(/(^|})\s*body\s*\{[^}]*\}/gi, "$1")
+      .replace(/html\s*\{[^}]*\}/gi, "")
+      .replace(/\.fit(?:-inner)?[^{]*\{[^}]*\}/gi, "")
+      .replace(/\.jsheet\b/g, ".pack-journey-sheet")
+      .trim();
+  },
+
+  _injectJourneyCss(parsed, wrap) {
+    if (!wrap || wrap.querySelector("style[data-journey-css]")) return;
+    const css = this._journeyCssFromParsed(parsed);
+    if (!css) return;
+    const style = parsed.createElement("style");
+    style.setAttribute("data-journey-css", "1");
+    style.textContent = css;
+    wrap.insertBefore(style, wrap.firstChild);
+  },
+
+  _abJourneyFromParsed(parsed) {
+    const ab = parsed?.querySelector?.(".ab");
+    if (!ab) return "";
+    ab.querySelectorAll("script").forEach((node) => node.remove());
+    const host = parsed.createElement("div");
+    host.className = "pack-journey";
+    const wrap = parsed.createElement("div");
+    wrap.className = "pack-journey-sheet";
+    wrap.setAttribute("style", "padding:0;background:transparent");
+    this._injectJourneyCss(parsed, wrap);
+    // Fallback for older .ab sheets when style filter differs.
+    if (!wrap.querySelector("style[data-journey-css]")) {
+      const css = [...parsed.querySelectorAll("style")]
+        .map((node) => String(node.textContent || ""))
+        .filter((chunk) => /\.ab\b|\.pill\b|\.ribbon\b|\.card\b|--violet/.test(chunk))
+        .join("\n")
+        .replace(/@font-face\s*\{[^}]*\}/gi, "")
+        .replace(/html\s*,\s*body\s*\{[^}]*\}/gi, "")
+        .replace(/(^|})\s*body\s*\{[^}]*\}/gi, "$1")
+        .replace(/\.fit(?:-inner)?[^{]*\{[^}]*\}/gi, "");
+      if (css.trim()) {
+        const style = parsed.createElement("style");
+        style.setAttribute("data-journey-css", "1");
+        style.textContent = css;
+        wrap.appendChild(style);
+      }
+    }
+    wrap.appendChild(ab);
+    host.appendChild(wrap);
+    return host.outerHTML;
+  },
+
+  _journeyIcon(name) {
+    const icons = {
+      check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6.5L9.2 17.3 4 12.1"></path></svg>`,
+      doc: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5H7A2 2 0 0 0 5 5.5v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"></path><path d="M14 3.5v5h5M8.5 13h7M8.5 16.5h7"></path></svg>`,
+      shield: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7.5 2.8v5.2c0 4.6-3.2 7.4-7.5 8.5-4.3-1.1-7.5-3.9-7.5-8.5V6.3z"></path><path d="M8.8 12l2.2 2.2 4.2-4.4"></path></svg>`,
+      people: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"></circle><path d="M3.5 19.5c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5"></path><path d="M16 5.2a3.2 3.2 0 0 1 0 6.1M17.5 14.4c1.9.7 3 2.4 3 5.1"></path></svg>`,
+      bank: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h16M5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 20.5h17M12 3.5l8.5 4.5h-17z"></path></svg>`,
+      card: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"></rect><path d="M2.5 10h19M6 14.5h4"></path></svg>`,
+    };
+    return icons[name] || icons.check;
+  },
+
+  _journeyStepHtml(index) {
+    const n = Number(index) || 1;
+    const tone = ((n - 1) % 5) + 1;
+    const icons = ["doc", "shield", "people", "bank", "card"];
+    const icon = icons[(n - 1) % icons.length];
+    return `<div class="j-step">
+  <span class="j-ghost" contenteditable="false">${n}</span>
+  <div class="j-card">
+    <div class="j-card-top">
+      <span class="j-tile jt-${tone}" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon(icon)}</span></span>
+      <span class="j-kick">Step title</span>
+    </div>
+    <div class="j-cap">What happens here</div>
+    <div class="j-fill">
+      <div>
+        <div class="j-kv">
+          <div class="r"><span>Detail</span><b>Value</b></div>
+          <div class="r"><span>Detail</span><b>Value</b></div>
+        </div>
+      </div>
+      <div class="j-tags">
+        <span class="j-tag"><span class="i" style="width:9px;height:9px" contenteditable="false">${this._journeyIcon("check")}</span>Done</span>
+        <span class="j-tag j-tag--n">Next note</span>
+      </div>
+    </div>
+  </div>
+</div>`;
+  },
+
+  _syncJourneyChrome(journey) {
+    if (!journey) return;
+    [...journey.querySelectorAll(".j-cardrow > .j-step")].forEach((step, index) => {
+      const ghost = step.querySelector(".j-ghost");
+      if (ghost) ghost.textContent = String(index + 1);
+      const tile = step.querySelector(".j-tile");
+      if (tile) tile.className = `j-tile jt-${(index % 5) + 1}`;
+    });
+  },
+
+  _journeySnippet() {
+    const check = this._journeyIcon("check");
+    return `<div class="pack-journey"><div class="pack-journey-sheet">
+  <div class="j-pill j-pill--g" contenteditable="false"></div>
+  <div class="j-pill j-pill--y" contenteditable="false"></div>
+  <div class="j-pill j-pill--p" contenteditable="false"></div>
+  <header class="j-header">
+    <img class="j-logo" src="https://eps.edenred.com/hubfs/EPS-Red.svg" alt="Edenred Payment Solutions" contenteditable="false">
+    <div class="j-kicker">Card issuing</div>
+    <h2 class="j-title">Issue a Card for a Member</h2>
+    <p class="j-intro">How a member gets a card from their organisation: they request one, get verified, are added as an accountholder, and a sub-account linked to the organisation's account is created before the card is issued.</p>
+  </header>
+  <div class="j-steps" style="--cols:5">
+    <div class="j-vrow">
+      <svg class="j-ribbon" viewBox="0 0 1000 44" preserveAspectRatio="none" contenteditable="false" aria-hidden="true">
+        <path d="M -12 26 C 150 8, 250 8, 390 24 C 530 40, 630 40, 770 24 C 910 10, 990 10, 1012 22" stroke="#591BDD" stroke-width="6"></path>
+        <path class="dash" d="M -12 26 C 150 8, 250 8, 390 24 C 530 40, 630 40, 770 24 C 910 10, 990 10, 1012 22" stroke="#FD0966" stroke-width="6"></path>
+      </svg>
+      <div class="j-cardrow">
+        <div class="j-step">
+          <span class="j-ghost" contenteditable="false">1</span>
+          <div class="j-card">
+            <div class="j-card-top">
+              <span class="j-tile jt-1" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon("doc")}</span></span>
+              <span class="j-kick">Request a Card</span>
+            </div>
+            <div class="j-cap">A member requests a card</div>
+            <div class="j-fill">
+              <div>
+                <div class="j-kv">
+                  <div class="r"><span>Name</span><b>Alex Weber</b></div>
+                  <div class="r"><span>Email</span><b>alex.weber@acme.com</b></div>
+                  <div class="r"><span>Organisation</span><b>Acme GmbH</b></div>
+                </div>
+              </div>
+              <div class="j-tags">
+                <span class="j-tag"><span class="i" style="width:9px;height:9px" contenteditable="false">${check}</span>Submitted</span>
+                <span class="j-tag j-tag--n">Verification starts next</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="j-step">
+          <span class="j-ghost" contenteditable="false">2</span>
+          <div class="j-card">
+            <div class="j-card-top">
+              <span class="j-tile jt-2" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon("shield")}</span></span>
+              <span class="j-kick">Verify the Member</span>
+            </div>
+            <div class="j-cap">Member verified</div>
+            <div class="j-fill">
+              <div>
+                <div class="j-clist">
+                  <div class="j-clr"><span class="cb" contenteditable="false"><span class="i" style="width:8px;height:8px">${check}</span></span>Identity confirmed</div>
+                  <div class="j-clr"><span class="cb" contenteditable="false"><span class="i" style="width:8px;height:8px">${check}</span></span>Address confirmed</div>
+                  <div class="j-clr"><span class="cb" contenteditable="false"><span class="i" style="width:8px;height:8px">${check}</span></span>Screening passed</div>
+                </div>
+              </div>
+              <div class="j-tags"><span class="j-tag j-tag--n">Handled for you — usually minutes</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="j-step">
+          <span class="j-ghost" contenteditable="false">3</span>
+          <div class="j-card">
+            <div class="j-card-top">
+              <span class="j-tile jt-3" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon("people")}</span></span>
+              <span class="j-kick">Accountholder Created</span>
+            </div>
+            <div class="j-cap">Added as an accountholder</div>
+            <div class="j-fill">
+              <div>
+                <div class="j-panel">
+                  <span class="b2" contenteditable="false"><span class="i" style="width:13px;height:13px">${this._journeyIcon("people")}</span></span>
+                  <span class="tx"><b>Alex Weber</b><span>Accountholder · Acme GmbH</span></span>
+                </div>
+              </div>
+              <div class="j-tags">
+                <span class="j-tag"><span class="i" style="width:9px;height:9px" contenteditable="false">${check}</span>Created</span>
+                <span class="j-tag j-tag--n">Sits under the organisation</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="j-step">
+          <span class="j-ghost" contenteditable="false">4</span>
+          <div class="j-card">
+            <div class="j-card-top">
+              <span class="j-tile jt-4" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon("bank")}</span></span>
+              <span class="j-kick">Sub-Account Created</span>
+            </div>
+            <div class="j-cap">Sub-account created</div>
+            <div class="j-fill">
+              <div>
+                <div class="j-kv">
+                  <div class="r"><span>Sub-account</span><b>Alex Weber</b></div>
+                  <div class="r"><span>Linked to</span><b>Acme Business account</b></div>
+                  <div class="r"><span>Currency</span><b>EUR · Euro</b></div>
+                </div>
+              </div>
+              <div class="j-tags">
+                <span class="j-tag"><span class="i" style="width:9px;height:9px" contenteditable="false">${check}</span>Created &amp; linked</span>
+                <span class="j-tag j-tag--n">Draws on the organisation balance</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="j-step">
+          <span class="j-ghost" contenteditable="false">5</span>
+          <div class="j-card">
+            <div class="j-card-top">
+              <span class="j-tile jt-5" contenteditable="false"><span class="i" style="width:20px;height:20px">${this._journeyIcon("card")}</span></span>
+              <span class="j-kick">Card Issued</span>
+            </div>
+            <div class="j-cap">Card issued</div>
+            <div class="j-fill">
+              <div>
+                <div class="j-fund">
+                  <div class="h">Card · Alex Weber</div>
+                  <div class="rr big">•••• •••• •••• 7788</div>
+                  <div class="rr sm">Expires&nbsp;&nbsp;09 / 28</div>
+                </div>
+              </div>
+              <div class="j-tags">
+                <span class="j-tag"><span class="i" style="width:9px;height:9px" contenteditable="false">${check}</span>Active</span>
+                <span class="j-tag j-tag--n">Ready to use</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="j-recap" style="--feat-cols:4">
+    <div class="j-recap-h">Card live</div>
+    <p class="j-recap-x">The member's card is issued and draws on the organisation's account.</p>
+    <div class="j-feats">
+      <div class="j-feat"><span class="ft" contenteditable="false"><span class="i" style="width:13px;height:13px">${this._journeyIcon("bank")}</span></span><div><b>Funded centrally</b><p>Every member card draws on the organisation account.</p></div></div>
+      <div class="j-feat"><span class="ft" contenteditable="false"><span class="i" style="width:13px;height:13px">${this._journeyIcon("shield")}</span></span><div><b>Rules from one place</b><p>Set limits, categories and expiry for each card.</p></div></div>
+      <div class="j-feat"><span class="ft" contenteditable="false"><span class="i" style="width:13px;height:13px">${this._journeyIcon("people")}</span></span><div><b>Issue more</b><p>Add accountholders and cards under the same organisation.</p></div></div>
+      <div class="j-feat"><span class="ft" contenteditable="false"><span class="i" style="width:13px;height:13px">${check}</span></span><div><b>Verified once</b><p>Each member is checked once and kept on file.</p></div></div>
+    </div>
+  </div>
+</div></div>`;
   },
 
   _safeImageSrc(src) {
@@ -845,6 +1246,7 @@ const PackEditor = {
   <div class="rule-item"><h4>${this._icon("credit-card", 18)} Acceptance Method</h4><p>Restricts POS, eCommerce, Contactless, or tokenised mobile wallet channels.</p></div>
   <div class="rule-item"><h4>${this._icon("globe", 18)} Country Code Limits</h4><p>Restricts allowed countries where authorisations can be processed.</p></div>
 </div>`,
+      journey: this._journeySnippet(),
       card: '<div class="content-card"><h2>New section</h2><p>Add copy here.</p></div>',
       columns: `<div class="pack-columns pack-columns-2" style="--pack-columns:2">
   <div class="pack-column"><p>Left column</p></div>
@@ -1023,10 +1425,10 @@ const PackEditor = {
 
   _stripTabPlaceholderAroundObjects(panel) {
     if (!panel?.matches?.(".pack-tab-panel")) return;
-    const hasObject = panel.querySelector(":scope > .pack-flow, :scope > .pack-html, :scope > .pack-image, :scope > .diagram-container");
+    const hasObject = panel.querySelector(":scope > .pack-flow, :scope > .pack-html, :scope > .pack-image, :scope > .diagram-container, :scope > .pack-journey");
     if (!hasObject) return;
     [...panel.children].forEach((node) => {
-      if (node.matches?.(".pack-flow, .pack-html, .pack-image, .diagram-container, table")) return;
+      if (node.matches?.(".pack-flow, .pack-html, .pack-image, .diagram-container, .pack-journey, table")) return;
       const inner = String(node.textContent || "").replace(/\u00a0/g, " ").trim().toLowerCase();
       if (!inner || inner === "add copy here." || inner === "add copy here") node.remove();
     });
@@ -1214,6 +1616,13 @@ const PackEditor = {
       el.setAttribute("contenteditable", "true");
       this._stripTabPlaceholderAroundObjects(el);
     });
+    root.querySelectorAll(".pack-journey").forEach((journey) => {
+      if (typeof PackJourney !== "undefined") PackJourney.ensureSheet(journey);
+      journey.querySelectorAll(".j-pill, .j-ribbon, .j-ghost, .j-tile, .j-logo, .j-feat .ft, .j-tag .i, .j-clr .cb, .j-panel .b2, svg, img").forEach((el) => {
+        el.setAttribute("contenteditable", "false");
+      });
+    });
+    if (typeof PackJourney !== "undefined") PackJourney.bind(root, { frame: this.iframe });
     root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow, .pack-html").forEach((el) => {
       const lock = el.closest(".code-fold, .code-container, .diagram-container, .pack-flow, .pack-html") || el;
       lock.setAttribute("contenteditable", "false");
@@ -1300,8 +1709,14 @@ const PackEditor = {
     const root = this.root();
     const doc = this.doc();
     if (!root || !doc) return;
+    // Undo accidental wrapping of journey logos from older prepares.
+    root.querySelectorAll(".pack-journey .pack-image").forEach((figure) => {
+      const img = figure.querySelector("img.j-logo, img");
+      if (!img) return;
+      figure.replaceWith(img);
+    });
     root.querySelectorAll("img").forEach((img) => {
-      if (img.closest(".pack-image, .diagram-container, .pack-flow, .brand-lockup, table, .hero, .site-header")) return;
+      if (img.closest(".pack-image, .diagram-container, .pack-flow, .pack-journey, .brand-lockup, table, .hero, .site-header")) return;
       const figure = doc.createElement("figure");
       figure.className = "pack-image pack-image-center";
       figure.style.setProperty("--pack-image-width", "80%");
@@ -1446,6 +1861,7 @@ const PackEditor = {
     if (el.matches(".pack-image, .pack-image *")) return "Image";
     if (el.matches(".diagram-container, .diagram-container *")) return "Diagram";
     if (el.matches(".pack-flow, .pack-flow *")) return "API flow";
+    if (el.matches(".pack-journey, .pack-journey *")) return "Journey";
     if (el.matches(".code-fold, .code-container, pre")) return "Code example";
     if (el.matches(".pack-html, .pack-html *")) return "HTML";
     if (el.matches("table")) return "Table";

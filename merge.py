@@ -89,6 +89,156 @@ class Settings:
     )
     output_filename: str = "documentation.html"
     theme: dict = field(default_factory=dict)
+    translation_enabled: bool = True
+    languages: list = field(default_factory=lambda: ["fr"])
+
+
+LANG_META = {
+    "en": {
+        "native": "English",
+        "label": "English",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="40" fill="#012169"/>'
+            '<path d="M0,0 60,40M60,0 0,40" stroke="#fff" stroke-width="10"/>'
+            '<path d="M0,0 60,40M60,0 0,40" stroke="#C8102E" stroke-width="6"/>'
+            '<path d="M30,0v40M0,20h60" stroke="#fff" stroke-width="16"/>'
+            '<path d="M30,0v40M0,20h60" stroke="#C8102E" stroke-width="10"/>'
+            "</svg>"
+        ),
+    },
+    "fr": {
+        "native": "Français",
+        "label": "French",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="20" height="40" fill="#002395"/>'
+            '<rect x="20" width="20" height="40" fill="#fff"/>'
+            '<rect x="40" width="20" height="40" fill="#ED2939"/>'
+            "</svg>"
+        ),
+    },
+    "de": {
+        "native": "Deutsch",
+        "label": "German",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="13.34" fill="#000"/>'
+            '<rect y="13.34" width="60" height="13.33" fill="#D00"/>'
+            '<rect y="26.67" width="60" height="13.33" fill="#FFCE00"/>'
+            "</svg>"
+        ),
+    },
+    "es": {
+        "native": "Español",
+        "label": "Spanish",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="40" fill="#AA151B"/>'
+            '<rect y="10" width="60" height="20" fill="#F1BF00"/>'
+            "</svg>"
+        ),
+    },
+    "it": {
+        "native": "Italiano",
+        "label": "Italian",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="20" height="40" fill="#009246"/>'
+            '<rect x="20" width="20" height="40" fill="#fff"/>'
+            '<rect x="40" width="20" height="40" fill="#CE2B37"/>'
+            "</svg>"
+        ),
+    },
+    "pt": {
+        "native": "Português",
+        "label": "Portuguese",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="40" fill="#FF0000"/>'
+            '<rect width="23" height="40" fill="#006600"/>'
+            '<circle cx="23" cy="20" r="7.5" fill="#FFCC00"/>'
+            '<circle cx="23" cy="20" r="5" fill="#FF0000"/>'
+            "</svg>"
+        ),
+    },
+    "nl": {
+        "native": "Nederlands",
+        "label": "Dutch",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="13.34" fill="#AE1C28"/>'
+            '<rect y="13.34" width="60" height="13.33" fill="#fff"/>'
+            '<rect y="26.67" width="60" height="13.33" fill="#21468B"/>'
+            "</svg>"
+        ),
+    },
+    "pl": {
+        "native": "Polski",
+        "label": "Polish",
+        "svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" aria-hidden="true">'
+            '<rect width="60" height="20" fill="#fff"/>'
+            '<rect y="20" width="60" height="20" fill="#DC143C"/>'
+            "</svg>"
+        ),
+    },
+}
+
+
+def _normalize_languages(raw) -> list[str]:
+    allowed = set(LANG_META) - {"en"}
+    out: list[str] = []
+    if isinstance(raw, str):
+        values = re.split(r"[,\s]+", raw)
+    elif isinstance(raw, (list, tuple)):
+        values = raw
+    else:
+        values = []
+    for item in values:
+        code = str(item or "").strip().lower()
+        if code in allowed and code not in out:
+            out.append(code)
+    return out
+
+
+def _flag_html(code: str) -> str:
+    meta = LANG_META.get(code) or LANG_META["en"]
+    return f'<span class="pack-lang-flag" aria-hidden="true">{meta["svg"]}</span>'
+
+
+def language_switcher_html(settings: Settings) -> str:
+    if not settings.translation_enabled:
+        return ""
+    targets = _normalize_languages(settings.languages) or ["fr"]
+    codes = ["en"] + targets
+    options = []
+    for code in codes:
+        meta = LANG_META.get(code) or {"native": code, "label": code, "svg": ""}
+        selected = " is-active" if code == "en" else ""
+        aria = "true" if code == "en" else "false"
+        options.append(
+            "<li role=\"option\" class=\"pack-lang-option"
+            f"{selected}\" data-lang=\"{html_lib.escape(code)}\" aria-selected=\"{aria}\">"
+            f"{_flag_html(code)}"
+            f"<span>{html_lib.escape(meta['native'])}</span>"
+            "</li>"
+        )
+    targets_attr = html_lib.escape(",".join(targets))
+    en = LANG_META["en"]
+    return f"""      <div class="pack-lang" data-source="en" data-targets="{targets_attr}">
+        <div class="pack-lang-menu">
+          <button type="button" class="pack-lang-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Language: English">
+            {_flag_html("en")}
+            <span class="pack-lang-name">{en["native"]}</span>
+            <span class="pack-lang-caret" aria-hidden="true"></span>
+          </button>
+          <ul class="pack-lang-list" role="listbox" hidden>
+            {"".join(options)}
+          </ul>
+        </div>
+        <span class="pack-lang-status" hidden></span>
+      </div>"""
 
 
 def matching_div_end(html: str, start: int) -> int:
@@ -1554,6 +1704,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     confidential = (
         '<span class="confidential">Confidential</span>' if settings.confidential else ""
     )
+    language_switcher = language_switcher_html(settings)
     extra_css = nav_css(chapters)
     themed_css = apply_theme(css, settings.theme)
     page_title = html_lib.escape(settings.page_title)
@@ -1594,13 +1745,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     </a>
     <div class="header-meta">
       <span class="header-doc">{header_doc}</span>
-      <div class="pack-lang">
-        <select class="pack-lang-select" aria-label="Language">
-          <option value="en" selected>English</option>
-          <option value="fr">Français</option>
-        </select>
-        <span class="pack-lang-status" hidden></span>
-      </div>
+      {language_switcher}
       {confidential}
     </div>
   </header>
@@ -1618,13 +1763,16 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
 """
     zoom_js = load_pack_zoom_js()
     html_js = load_pack_html_js()
-    lang_js = load_pack_lang_js()
+    lang_js = load_pack_lang_js() if settings.translation_enabled and (_normalize_languages(settings.languages) or ["fr"]) else ""
+    journey_js = load_pack_journey_js()
     if zoom_js:
         html += _inline_script(zoom_js)
     if html_js:
         html += _inline_script(html_js)
     if lang_js:
         html += _inline_script(lang_js)
+    if journey_js:
+        html += _inline_script(journey_js)
     return html + "</body>\n</html>\n"
 
 
@@ -1706,6 +1854,10 @@ def settings_from_payload(data: dict) -> Settings:
             setattr(settings, key, value)
     if "confidential" in raw:
         settings.confidential = bool(raw["confidential"])
+    if "translation_enabled" in raw:
+        settings.translation_enabled = bool(raw["translation_enabled"])
+    if "languages" in raw:
+        settings.languages = _normalize_languages(raw.get("languages")) or (["fr"] if settings.translation_enabled else [])
     theme = raw.get("theme")
     if isinstance(theme, dict):
         cleaned = {}
@@ -1773,6 +1925,14 @@ def load_pack_html_js() -> str:
 
 def load_pack_lang_js() -> str:
     path = ROOT / "js" / "pack-lang.js"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+
+def load_pack_journey_js() -> str:
+    path = ROOT / "js" / "pack-journey.js"
     try:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:

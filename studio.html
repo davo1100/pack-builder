@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Permissions-Policy" content="translator=(self)">
   <title>Client pack builder | Edenred Payment Solutions</title>
-  <link rel="stylesheet" href="css/studio.css">
+  <link rel="stylesheet" href="css/studio.css?v=lang6">
 </head>
 <body>
   <header class="studio-header">
@@ -80,6 +80,16 @@
         <label for="output-filename">Download file name</label>
         <input id="output-filename" type="text" value="documentation.html">
       </div>
+      </details>
+
+      <details class="fold" open>
+        <summary>Languages</summary>
+        <label class="check">
+          <input id="translation-enabled" type="checkbox" checked>
+          Show language switcher in the pack
+        </label>
+        <p class="field-hint">Source language is English. Tick languages to offer readers. Untick the switcher to remove translation.</p>
+        <div id="lang-target-list" class="lang-target-list" role="group" aria-label="Target languages"></div>
       </details>
 
       <details class="fold" open>
@@ -221,6 +231,7 @@
               <p class="insert-heading">Visuals</p>
               <button type="button" data-insert="image">Image</button>
               <button type="button" data-insert="rules">Icon cards</button>
+              <button type="button" data-insert="journey">Journey</button>
               <button type="button" data-insert="diagram">Diagram</button>
               <button type="button" data-insert="flow">API flow</button>
               <p class="insert-heading">Technical</p>
@@ -251,6 +262,18 @@
             <button type="button" data-tabs="add">+ Tab</button>
             <button type="button" data-tabs="remove">− Tab</button>
             <input id="tab-title" type="text" placeholder="Tab name" maxlength="40">
+          </div>
+          <div class="tool-group tool-context" id="journey-tools" hidden>
+            <span class="toolbar-label">Journey</span>
+            <div class="tool-cluster tool-segment">
+              <button type="button" data-journey="3">3</button>
+              <button type="button" data-journey="4">4</button>
+              <button type="button" data-journey="5">5</button>
+            </div>
+            <button type="button" data-journey="add-step">+ Step</button>
+            <button type="button" data-journey="remove-step">− Step</button>
+            <button type="button" data-journey="add-feat">+ Highlight</button>
+            <button type="button" data-journey="remove-feat">− Highlight</button>
           </div>
           <div class="tool-group tool-context" id="table-tools" hidden>
             <span class="toolbar-label">Table</span>
@@ -420,7 +443,7 @@
       <header class="image-head">
         <div>
           <strong id="html-modal-title">Insert HTML</strong>
-          <span>Paste a snippet or a full HTML page. It renders inside the selected section.</span>
+          <span>Paste a snippet, a journey sheet, or a full HTML page. Journeys stay editable on the page.</span>
         </div>
         <button class="btn" type="button" id="html-cancel">Cancel</button>
       </header>
@@ -577,15 +600,16 @@
 
   <script src="js/icons.js"></script>
   <script src="js/syntax.js"></script>
-  <script src="js/pack-html.js?v=insert-html3"></script>
-  <script src="js/editor.js?v=tabs-flush1"></script>
+  <script src="js/pack-html.js?v=journey9"></script>
+  <script src="js/editor.js?v=journey9"></script>
   <script src="js/diagram.js"></script>
   <script src="js/flow-ir.js?v=flow-sheet6"></script>
   <script src="js/flow-parse.js?v=wsdl-xml3"></script>
   <script src="js/flow-image.js?v=seq-import15"></script>
   <script src="js/flow-render.js?v=flow-sheet6"></script>
   <script src="js/flow-studio.js?v=flow-sheet6"></script>
-  <script src="js/pack-lang.js?v=lang4"></script>
-  <script src="js/studio.js?v=flow-sheet1"></script>
+  <script src="js/pack-lang.js?v=lang6"></script>
+  <script src="js/pack-journey.js?v=journey9"></script>
+  <script src="js/studio.js?v=lang6"></script>
 </body>
 </html>

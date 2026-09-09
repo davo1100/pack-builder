@@ -7,7 +7,11 @@ const state = {
   previewTimer: null,
   previewUrl: "",
   useImportedPreview: false,
+  i18nCache: null,
+  langWarm: false,
 };
+
+const DEFAULT_LANG_TARGETS = ["fr"];
 
 const els = {
   status: document.getElementById("status"),
@@ -36,6 +40,8 @@ const els = {
   confidential: document.getElementById("confidential"),
   footer: document.getElementById("footer"),
   outputFilename: document.getElementById("output-filename"),
+  translationEnabled: document.getElementById("translation-enabled"),
+  langTargetList: document.getElementById("lang-target-list"),
 };
 
 function setStatus(text, kind) {
@@ -146,6 +152,13 @@ function applyIncomingSettings(settings) {
   if ("confidential" in settings && els.confidential) els.confidential.checked = Boolean(settings.confidential);
   if (settings.footer && els.footer) els.footer.value = settings.footer;
   if (settings.output_filename && els.outputFilename) els.outputFilename.value = settings.output_filename;
+  if ("translation_enabled" in settings && els.translationEnabled) {
+    els.translationEnabled.checked = Boolean(settings.translation_enabled);
+  }
+  if ("languages" in settings || "translation_enabled" in settings) {
+    renderLanguageTargets(settings.languages);
+    syncLanguageControls();
+  }
   const theme = settings.theme || {};
   const colors = {
     magenta: "theme-magenta",
@@ -173,9 +186,74 @@ function applyIncomingSettings(settings) {
   }
   PackEditor.applyTheme(themeOverrideCss());
   syncFaviconPreview();
+  warmLanguagePacks();
+}
+
+function languageCatalog() {
+  if (window.PackLang?.catalog) return PackLang.catalog();
+  return [
+    { code: "fr", native: "Français", label: "French" },
+    { code: "de", native: "Deutsch", label: "German" },
+    { code: "es", native: "Español", label: "Spanish" },
+    { code: "it", native: "Italiano", label: "Italian" },
+    { code: "pt", native: "Português", label: "Portuguese" },
+    { code: "nl", native: "Nederlands", label: "Dutch" },
+    { code: "pl", native: "Polski", label: "Polish" },
+  ];
+}
+
+function selectedLanguages() {
+  if (!els.langTargetList) return DEFAULT_LANG_TARGETS.slice();
+  return [...els.langTargetList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+}
+
+function renderLanguageTargets(selected) {
+  if (!els.langTargetList) return;
+  const chosen = new Set(
+    (Array.isArray(selected) ? selected : DEFAULT_LANG_TARGETS)
+      .map((code) => String(code || "").toLowerCase())
+      .filter(Boolean)
+  );
+  if (!chosen.size) chosen.add("fr");
+  els.langTargetList.innerHTML = languageCatalog()
+    .map((lang) => {
+      const flag =
+        lang.svg ||
+        (window.PackLang?.LANGS?.[lang.code]?.svg) ||
+        "";
+      return `<label class="lang-target">
+      <input type="checkbox" value="${lang.code}" ${chosen.has(lang.code) ? "checked" : ""}>
+      <span class="lang-target-flag" aria-hidden="true">${flag}</span>
+      <span>${lang.native}</span>
+    </label>`;
+    })
+    .join("");
+}
+
+function syncLanguageControls() {
+  if (!els.langTargetList || !els.translationEnabled) return;
+  els.langTargetList.classList.toggle("is-disabled", !els.translationEnabled.checked);
+  if (els.translationEnabled.checked && !selectedLanguages().length) {
+    const fr = els.langTargetList.querySelector('input[value="fr"]');
+    if (fr) fr.checked = true;
+  }
+}
+
+function warmLanguagePacks() {
+  if (!window.PackLang?.warmUp) return;
+  if (!els.translationEnabled?.checked) return;
+  const targets = selectedLanguages();
+  if (!targets.length) return;
+  PackLang.warmUp(targets).then(() => {
+    state.langWarm = true;
+  }).catch(() => {});
 }
 
 function settingsPayload() {
+  const translationEnabled = els.translationEnabled ? els.translationEnabled.checked : true;
+  let languages = selectedLanguages();
+  if (translationEnabled && !languages.length) languages = DEFAULT_LANG_TARGETS.slice();
+  if (!translationEnabled) languages = [];
   return {
     page_title: els.pageTitle.value.trim(),
     header_doc: els.headerDoc.value.trim(),
@@ -185,6 +263,8 @@ function settingsPayload() {
     confidential: els.confidential.checked,
     footer: els.footer.value,
     output_filename: els.outputFilename.value.trim() || "documentation.html",
+    translation_enabled: translationEnabled,
+    languages,
     theme: themePayload(),
   };
 }
@@ -988,6 +1068,12 @@ function settingsFromPackHtml(html, filename) {
     confidential: /class="confidential"/.test(html),
     footer: innerText(html, /<p class="site-footer">([\s\S]*?)<\/p>/i) || "",
     output_filename: String(filename || "documentation.html").split(/[\\/]/).pop(),
+    translation_enabled: /class="pack-lang"/.test(html),
+    languages: (() => {
+      const match = String(html || "").match(/data-targets="([^"]*)"/i);
+      if (!match) return /pack-lang/.test(html) ? ["fr"] : [];
+      return match[1].split(/[,\s]+/).map((code) => code.trim().toLowerCase()).filter(Boolean);
+    })(),
   };
 }
 
@@ -1310,6 +1396,22 @@ document.querySelectorAll(".tabs button").forEach((button) => {
   });
 });
 
+renderLanguageTargets(DEFAULT_LANG_TARGETS);
+syncLanguageControls();
+els.translationEnabled?.addEventListener("change", () => {
+  state.useImportedPreview = false;
+  syncLanguageControls();
+  warmLanguagePacks();
+  schedulePreview(true);
+});
+els.langTargetList?.addEventListener("change", () => {
+  state.useImportedPreview = false;
+  syncLanguageControls();
+  warmLanguagePacks();
+  schedulePreview(true);
+});
+warmLanguagePacks();
+
 els.faviconChoose?.addEventListener("click", () => els.faviconFile?.click());
 els.faviconFile?.addEventListener("change", (event) => {
   const file = event.target.files?.[0];
@@ -1591,6 +1693,10 @@ PackEditor.bind(els.editor, {
     if (diagramTools) diagramTools.hidden = !isDiagram;
     const flowTools = document.getElementById("flow-tools");
     if (flowTools) flowTools.hidden = !isFlow;
+    const journeyTools = document.getElementById("journey-tools");
+    const journey = PackEditor.journeyInfo();
+    if (journeyTools) journeyTools.hidden = !journey;
+    if (journey) syncJourneyTools(journey);
     const htmlTools = document.getElementById("html-tools");
     const htmlBlock = PackEditor.htmlFromSelection();
     if (htmlTools) htmlTools.hidden = !htmlBlock;
@@ -1623,6 +1729,8 @@ PackEditor.bind(els.editor, {
         : "Diagram selected. Click Edit diagram, or double-click it to open the creator.";
     } else if (isFlow) {
       els.editorHint.textContent = "API flow selected. Click Edit flow, or double-click it to reopen Flow Studio.";
+    } else if (journey) {
+      els.editorHint.textContent = "Journey selected. Edit the text in the page, or add and remove steps here.";
     } else if (htmlBlock) {
       els.editorHint.textContent = "HTML selected. Click Edit HTML, or double-click it to change the markup.";
     } else if (tabs) {
@@ -1872,6 +1980,17 @@ function syncTabTools(info) {
   });
 }
 
+function syncJourneyTools(info) {
+  document.querySelectorAll("#journey-tools [data-journey]").forEach((button) => {
+    const key = button.dataset.journey;
+    if (key === "add-step") button.disabled = info.steps >= 6;
+    else if (key === "remove-step") button.disabled = info.steps <= 2;
+    else if (key === "add-feat") button.disabled = info.feats >= 6;
+    else if (key === "remove-feat") button.disabled = info.feats <= 1;
+    else button.classList.toggle("is-active", Number(key) === info.steps);
+  });
+}
+
 function openImageModal(mode) {
   imageModalMode = mode === "replace" ? "replace" : "add";
   const modal = document.getElementById("image-modal");
@@ -1971,6 +2090,25 @@ document.getElementById("tab-title").addEventListener("input", (event) => {
   PackEditor.setTabTitle(event.target.value);
 });
 
+document.getElementById("journey-tools").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-journey]");
+  if (!button) return;
+  const key = button.dataset.journey;
+  let ok = false;
+  if (key === "add-step") ok = PackEditor.addJourneyStep();
+  else if (key === "remove-step") ok = PackEditor.removeJourneyStep();
+  else if (key === "add-feat") ok = PackEditor.addJourneyFeat();
+  else if (key === "remove-feat") ok = PackEditor.removeJourneyFeat();
+  else ok = PackEditor.setJourneySteps(key);
+  if (!ok) {
+    setStatus("Click a journey first, then change steps or highlights", "error");
+    return;
+  }
+  const info = PackEditor.journeyInfo();
+  if (info) syncJourneyTools(info);
+  setStatus(info ? `${info.steps} steps · ${info.feats} highlights` : "Journey updated", "ok");
+});
+
 document.getElementById("image-tools").addEventListener("click", (event) => {
   const size = event.target.closest("[data-image-size]");
   if (size) {
@@ -2030,6 +2168,7 @@ function closeHtmlModal() {
 
 function applyHtmlSnippet() {
   const raw = document.getElementById("html-source").value;
+  const isJourney = Boolean(PackEditor._journeyFromHtml?.(raw));
   const ok = htmlModalMode === "edit"
     ? PackEditor.replaceHtmlSnippet(raw)
     : PackEditor.insertHtmlSnippet(raw);
@@ -2039,7 +2178,16 @@ function applyHtmlSnippet() {
     return;
   }
   closeHtmlModal();
-  setStatus(htmlModalMode === "edit" ? "HTML updated" : "HTML inserted", "ok");
+  setStatus(
+    htmlModalMode === "edit"
+      ? isJourney
+        ? "Journey updated"
+        : "HTML updated"
+      : isJourney
+        ? "Journey inserted — edit the text on the page"
+        : "HTML inserted",
+    "ok"
+  );
   schedulePreview(true);
 }
 
@@ -2120,8 +2268,14 @@ function emptyPreview(message) {
 async function refreshPreview() {
   if (!state.docs.some((d) => d.include)) return;
   if (state.useImportedPreview && state.lastHtml) {
-    showPreviewHtml(state.lastHtml);
-    return;
+    const staleLangUi =
+      /class=["']pack-lang-select["']/.test(state.lastHtml) ||
+      (/class=["']pack-lang["']/.test(state.lastHtml) && !/class=["']pack-lang-btn["']/.test(state.lastHtml));
+    if (!staleLangUi) {
+      showPreviewHtml(state.lastHtml);
+      return;
+    }
+    state.useImportedPreview = false;
   }
   setStatus("Building preview…");
   try {
@@ -2322,9 +2476,18 @@ async function downloadPack() {
 
 async function downloadTranslatedPack(html, filename) {
   let packed = html;
-  if (window.PackLang?.embedTranslations) {
+  const settings = settingsPayload();
+  if (
+    settings.translation_enabled &&
+    settings.languages?.length &&
+    window.PackLang?.embedTranslations
+  ) {
     try {
-      packed = await PackLang.embedTranslations(html, (message) => setStatus(message));
+      packed = await PackLang.embedTranslations(
+        html,
+        (message) => setStatus(message),
+        { targets: settings.languages }
+      );
     } catch (err) {
       packed = html;
     }
