@@ -1024,9 +1024,10 @@ const FlowRender = {
   _conditionMetrics(step) {
     const question = String(step.caption || step.label || "Decide?");
     const qLines = this._wrapToWidth(question, 13, 390);
+    const heading = String(step.heading || "Decision").trim() || "Decision";
     const branches = (Array.isArray(step.branches) ? step.branches : []).slice(0, 4);
     const branchMetrics = branches.map((branch, index) => this._conditionBranchMetrics(branch, index));
-    const headerH = 12 + 14 + qLines.length * 16 + 10;
+    const headerH = 12 + 14 + qLines.length * 16 + 10 + (step.refNum ? 14 : 0);
     const branchesH = branchMetrics.reduce((sum, item) => sum + item.h, 0);
     const w = Math.max(420, ...branchMetrics.map((item) => item.w), 48 + Math.max(...qLines.map((line) => this._textWidth(line, 13)), 120));
     const h = headerH + branchesH;
@@ -1034,6 +1035,9 @@ const FlowRender = {
       w: Math.min(520, w),
       h,
       question: qLines,
+      heading,
+      refNum: step.refNum || null,
+      refLabel: step.refLabel || "",
       branches: branchMetrics,
       headerH,
       kind: "Decision",
@@ -1042,8 +1046,9 @@ const FlowRender = {
   },
 
   _conditionBranchMetrics(branch, index) {
+    const scheme = branch.scheme || FlowIR.branchScheme(branch, index);
     const tone = branch.tone || FlowIR.branchTone(branch, index);
-    const label = String(branch.label || (tone === "yes" ? "Yes" : "No"));
+    const label = String(branch.label || (scheme === "stop" ? "No" : scheme === "pending" ? "Pending" : "Yes"));
     const detail = String(branch.detail || branch.targetLabel || "").trim();
     const detailLines = detail ? this._wrapToWidth(detail, 11, 320) : [];
     const method = String(branch.method || "").toUpperCase();
@@ -1051,11 +1056,13 @@ const FlowRender = {
     const status = branch.status != null && branch.status !== "" ? String(branch.status) : "";
     const ends = Boolean(branch.ends);
     const continues = !ends;
+    const footer = String(branch.footer || "").trim() || FlowIR.defaultBranchFooter(branch);
+    const footerLines = footer ? this._wrapToWidth(footer, 9, 320) : [];
     let h = 20;
     if (detailLines.length) h += detailLines.length * 14;
     else h += 14;
     if (method || path || status) h += 18;
-    if (ends || continues) h += 16;
+    if (footerLines.length) h += footerLines.length * 12 + 4;
     h += 8;
     const callW =
       (method ? this._monoWidth(method, 8.5) + 14 : 0) +
@@ -1063,8 +1070,10 @@ const FlowRender = {
       (status ? this._monoWidth(status, 8.5) + 14 : 0) +
       70;
     const detailW = detailLines.reduce((max, line) => Math.max(max, this._textWidth(line, 11)), 0);
-    const w = Math.max(360, 70 + Math.max(detailW, callW) + 30);
+    const footerW = footerLines.reduce((max, line) => Math.max(max, this._textWidth(line, 9)), 0);
+    const w = Math.max(360, 70 + Math.max(detailW, callW, footerW) + 30);
     return {
+      scheme,
       tone,
       label,
       detailLines,
@@ -1073,6 +1082,10 @@ const FlowRender = {
       status,
       ends,
       continues,
+      footer,
+      footerLines,
+      targetNum: branch.targetNum || null,
+      targetLabel: branch.targetLabel || "",
       h,
       w,
     };
@@ -1086,9 +1099,10 @@ const FlowRender = {
     const stubEnd = Math.max(stubStart + 12, cardLeft);
     const diamondY = y + 16;
     const ink = "#6D28D9";
+    const badge = step.refNum || step.number || num;
     let html = `<g>`;
     html += `<line x1="${stubStart}" y1="${diamondY}" x2="${stubEnd}" y2="${diamondY}" stroke="${ink}" stroke-width="2" stroke-dasharray="2 4"/>`;
-    html += this._decisionDiamond(laneX, diamondY, num, ink);
+    html += this._decisionDiamond(laneX, diamondY, badge, ink);
     html += this._conditionBox(cardLeft + w / 2, y + 8, step, { ...metrics, w });
     html += `</g>`;
     return html;
@@ -1113,14 +1127,22 @@ const FlowRender = {
     const ink = metrics.ink || "#6D28D9";
     const tint = "#ECE5FB";
     const headerH = metrics.headerH || 42;
+    const heading = String(metrics.heading || step.heading || "Decision").toUpperCase();
     const path = this._decisionCardPath(left, top, w, h);
     let html = `<g>`;
     html += `<path d="${path}" fill="#FFFFFF" stroke="${ink}" stroke-width="1.5"/>`;
     html += `<path d="${this._decisionHeaderPath(left, top, w, headerH)}" fill="${tint}"/>`;
     html += `<line x1="${left}" y1="${top + headerH}" x2="${left + w}" y2="${top + headerH}" stroke="${ink}" stroke-width="1.5"/>`;
-    html += `<text x="${left + 15}" y="${top + 18}" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="8.5" font-weight="700" letter-spacing="0.16em" fill="${ink}">DECISION</text>`;
+    html += `<text x="${left + 15}" y="${top + 18}" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="8.5" font-weight="700" letter-spacing="0.16em" fill="${ink}">${this.escape(heading)}</text>`;
+    let qy = top + 36;
+    if (metrics.refNum) {
+      const refBits = [`STEP ${metrics.refNum}`];
+      if (metrics.refLabel) refBits.push(metrics.refLabel);
+      html += `<text x="${left + 15}" y="${qy}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${ink}">${this.escape(refBits.join(" · "))}</text>`;
+      qy += 14;
+    }
     metrics.question.forEach((line, index) => {
-      html += `<text x="${left + 15}" y="${top + 36 + index * 16}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#201D22">${this.escape(line)}</text>`;
+      html += `<text x="${left + 15}" y="${qy + index * 16}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#201D22">${this.escape(line)}</text>`;
     });
     let by = top + headerH;
     (metrics.branches || []).forEach((branch, index) => {
@@ -1145,25 +1167,50 @@ const FlowRender = {
     return `M${x + tl} ${y} H${x + w - tr} Q${x + w} ${y} ${x + w} ${y + tr} V${y + h} H${x} V${y + tl} Q${x} ${y} ${x + tl} ${y} Z`;
   },
 
+  _branchSchemeStyle(scheme) {
+    if (scheme === "stop") {
+      return { tint: "#FCE2E8", tag: "#E11D48", tip: "#E11D48", icon: "stop" };
+    }
+    if (scheme === "pending") {
+      return { tint: "#FEF3C7", tag: "#D97706", tip: "#9A6207", icon: "pending" };
+    }
+    return { tint: "#E1F5E9", tag: "#16A34A", tip: "#0E6E33", icon: "proceed" };
+  },
+
+  _branchSchemeIcon(kind, cx, cy) {
+    if (kind === "stop") {
+      return `<g stroke="#FFFFFF" fill="none" stroke-width="1.9" stroke-linecap="round">
+        <line x1="${cx - 3.4}" y1="${cy - 3.4}" x2="${cx + 3.4}" y2="${cy + 3.4}"/>
+        <line x1="${cx + 3.4}" y1="${cy - 3.4}" x2="${cx - 3.4}" y2="${cy + 3.4}"/>
+      </g>`;
+    }
+    if (kind === "pending") {
+      return `<g fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round">
+        <circle cx="${cx}" cy="${cy}" r="4.4"/>
+        <line x1="${cx}" y1="${cy + 0.2}" x2="${cx}" y2="${cy - 2.4}"/>
+        <line x1="${cx}" y1="${cy + 0.2}" x2="${cx + 2.1}" y2="${cy + 1.3}"/>
+      </g>`;
+    }
+    return `<path d="M${cx - 3.8} ${cy + 0.2} l2.6 2.6 5.2-5.2" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`;
+  },
+
   _conditionBranch(left, top, w, branch, index) {
-    const tone = branch.tone || (index === 0 ? "yes" : "no");
-    const yes = tone === "yes";
-    const tint = yes ? "#E1F5E9" : "#FCE2E8";
-    const tag = yes ? "#16A34A" : "#E11D48";
-    const tip = yes ? "#0E6E33" : "#E11D48";
+    const scheme = branch.scheme || FlowIR.branchScheme?.(branch, index) || (index === 0 ? "proceed" : index === 1 ? "stop" : "pending");
+    const style = this._branchSchemeStyle(scheme);
     const padX = 15;
     const padY = 10;
     const gradId = this.uid("cg");
     let html = `<g>`;
-    html += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${tint}"/><stop offset="62%" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>`;
+    html += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${style.tint}"/><stop offset="62%" stop-color="${style.tint}" stop-opacity="0"/></linearGradient></defs>`;
     html += `<rect x="${left}" y="${top}" width="${w}" height="${branch.h}" fill="url(#${gradId})"/>`;
     if (index > 0) html += `<line x1="${left}" y1="${top}" x2="${left + w}" y2="${top}" stroke="#E7E3F2"/>`;
-    const tagLabel = String(branch.label || (yes ? "Yes" : "No")).toUpperCase();
-    const mark = yes ? "✓" : "✗";
-    const tagText = `${mark} ${tagLabel}`;
-    const tagW = Math.max(48, this._monoWidth(tagText, 9) + 18);
-    html += `<path d="${this._chipPath(left + padX, top + padY, tagW, 20)}" fill="${tag}"/>`;
-    html += `<text x="${left + padX + tagW / 2}" y="${top + padY + 14}" text-anchor="middle" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="9" font-weight="700" letter-spacing="0.05em" fill="#FFFFFF">${this.escape(tagText)}</text>`;
+    const tagLabel = String(branch.label || (scheme === "stop" ? "No" : scheme === "pending" ? "Pending" : "Yes")).toUpperCase();
+    const tagW = Math.max(56, 22 + this._monoWidth(tagLabel, 9) + 14);
+    const chipX = left + padX;
+    const chipY = top + padY;
+    html += `<path d="${this._chipPath(chipX, chipY, tagW, 20)}" fill="${style.tag}"/>`;
+    html += this._branchSchemeIcon(style.icon, chipX + 12, chipY + 10);
+    html += `<text x="${chipX + 22}" y="${chipY + 14}" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="9" font-weight="700" letter-spacing="0.05em" fill="#FFFFFF">${this.escape(tagLabel)}</text>`;
     const bodyX = left + padX + tagW + 11;
     let ty = top + padY + 12;
     const lines = branch.detailLines?.length ? branch.detailLines : [""];
@@ -1174,9 +1221,9 @@ const FlowRender = {
     if (branch.method || branch.path || branch.status) {
       let cx = bodyX;
       if (branch.method) {
-        const style = this.methodStyle(branch.method);
+        const methodStyle = this.methodStyle(branch.method);
         const mw = Math.max(40, this._monoWidth(branch.method, 8.5) + 12);
-        html += `<path d="${this._chipPath(cx, ty - 10, mw, 16)}" fill="${style.fill}"/>`;
+        html += `<path d="${this._chipPath(cx, ty - 10, mw, 16)}" fill="${methodStyle.fill}"/>`;
         html += `<text x="${cx + mw / 2}" y="${ty + 1}" text-anchor="middle" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="8.5" font-weight="700" fill="#FFFFFF">${this.escape(branch.method)}</text>`;
         cx += mw + 6;
       }
@@ -1194,9 +1241,17 @@ const FlowRender = {
       ty += 18;
     }
     if (branch.ends) {
-      html += `<text x="${bodyX}" y="${ty + 2}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${tip}">▪ FLOW ENDS HERE</text>`;
+      const lines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Flow ends here"];
+      lines.forEach((line, index) => {
+        const prefix = index === 0 ? "▪ " : "";
+        html += `<text x="${bodyX}" y="${ty + 2 + index * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
+      });
     } else {
-      html += `<text x="${bodyX}" y="${ty + 2}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${tip}">→ CONTINUES BELOW</text>`;
+      const lines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Continues below"];
+      lines.forEach((line, index) => {
+        const prefix = index === 0 ? "→ " : "";
+        html += `<text x="${bodyX}" y="${ty + 2 + index * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
+      });
     }
     html += `</g>`;
     return html;

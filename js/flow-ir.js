@@ -4,6 +4,12 @@ const FlowIR = {
   STEP_TYPES: ["request", "response", "process", "condition"],
   CONDITION_KINDS: ["business", "http", "capability", "routing"],
   PROCESS_MARKS: ["", "ok", "current", "pending"],
+  BRANCH_SCHEMES: ["proceed", "stop", "pending"],
+  BRANCH_SCHEME_LABELS: {
+    proceed: "Proceed",
+    stop: "Stop",
+    pending: "Pending",
+  },
   CONDITION_KIND_LABELS: {
     business: "Business",
     http: "HTTP",
@@ -241,6 +247,9 @@ const FlowIR = {
     }
     if (type === "condition") {
       out.kind = this.CONDITION_KINDS.includes(step?.kind) ? step.kind : "business";
+      const heading = String(step?.heading || step?.badge || "").trim();
+      if (heading) out.heading = heading;
+      if (step?.ref) out.ref = String(step.ref);
       const raw = Array.isArray(step?.branches) ? step.branches : Array.isArray(step?.outcomes) ? step.outcomes : this.defaultBranches();
       out.branches = raw.map((branch, i) => this._normalizeBranch(branch, i));
       if (!out.branches.length) out.branches = this.defaultBranches();
@@ -251,8 +260,8 @@ const FlowIR = {
 
   defaultBranches() {
     return [
-      { id: this.uid("b"), label: "Yes", when: "true", target: "", detail: "", ends: false },
-      { id: this.uid("b"), label: "No", when: "false", target: "", detail: "", ends: true },
+      { id: this.uid("b"), label: "Yes", when: "true", target: "", detail: "", ends: false, scheme: "proceed" },
+      { id: this.uid("b"), label: "No", when: "false", target: "", detail: "", ends: true, scheme: "stop" },
     ];
   },
 
@@ -263,6 +272,7 @@ const FlowIR = {
       label: String(branch?.label || branch?.condition || fallback).trim() || fallback,
       target: branch?.target ? String(branch.target) : "",
       when: branch?.when != null && branch.when !== "" ? String(branch.when) : "",
+      scheme: this.branchScheme(branch, index),
     };
     const detail = String(branch?.detail || branch?.action || branch?.description || "").trim();
     if (detail) next.detail = detail;
@@ -275,14 +285,34 @@ const FlowIR = {
       next.status = Number.isFinite(status) ? status : String(branch.status);
     }
     if (branch?.ends === true || branch?.ends === "true" || branch?.end === true) next.ends = true;
+    const footer = String(branch?.footer || branch?.continueText || branch?.endsText || "").trim();
+    if (footer) next.footer = footer;
     return next;
   },
 
   branchTone(branch, index) {
+    const scheme = this.branchScheme(branch, index);
+    if (scheme === "proceed") return "yes";
+    if (scheme === "stop") return "no";
+    if (scheme === "pending") return "pending";
     const label = String(branch?.label || "").trim().toLowerCase();
     if (/^(yes|y|true|ok|success|pass|continue)/i.test(label)) return "yes";
     if (/^(no|n|false|fail|error|end|stop|rollback)/i.test(label)) return "no";
     return index === 0 ? "yes" : index === 1 ? "no" : index % 2 === 0 ? "yes" : "no";
+  },
+
+  branchScheme(branch, index) {
+    const raw = String(branch?.scheme || branch?.style || branch?.tone || "").trim().toLowerCase();
+    if (raw === "yes" || raw === "ok" || raw === "success" || raw === "continue") return "proceed";
+    if (raw === "no" || raw === "fail" || raw === "error" || raw === "end") return "stop";
+    if (this.BRANCH_SCHEMES.includes(raw)) return raw;
+    if (index === 0) return "proceed";
+    if (index === 1) return "stop";
+    return "pending";
+  },
+
+  branchSchemeLabel(scheme) {
+    return this.BRANCH_SCHEME_LABELS[scheme] || this.BRANCH_SCHEME_LABELS.proceed;
   },
 
   conditionKindLabel(kind) {
@@ -473,6 +503,22 @@ const FlowIR = {
         return fromOk || toOk;
       })
       .map((step) => this._presentStep(step, pres, src, visibleIds));
+    const numbers = Object.create(null);
+    steps.forEach((step, index) => {
+      numbers[step.id] = index + 1;
+      step.number = index + 1;
+    });
+    steps.forEach((step) => {
+      if (step.type !== "condition") return;
+      if (step.ref && numbers[step.ref]) {
+        step.refNum = numbers[step.ref];
+        const linked = steps.find((item) => item.id === step.ref) || (src.steps || []).find((item) => item.id === step.ref);
+        step.refLabel = linked ? this._plainAction(linked) || linked.label || "" : "";
+      }
+      (step.branches || []).forEach((branch) => {
+        if (branch.target && numbers[branch.target] != null) branch.targetNum = numbers[branch.target];
+      });
+    });
     return {
       ok: true,
       errors: [],
@@ -483,6 +529,7 @@ const FlowIR = {
         steps,
         presentation: pres,
         source: src,
+        numbers,
       },
     };
   },
@@ -558,6 +605,8 @@ const FlowIR = {
     if (step.type === "condition") {
       next.kind = this.CONDITION_KINDS.includes(step.kind) ? step.kind : "business";
       next.kindLabel = pres.audience === "process" ? "" : this.conditionKindLabel(next.kind);
+      next.heading = String(step.heading || "").trim() || "Decision";
+      if (step.ref) next.ref = String(step.ref);
       next.branches = this._presentBranches(step, src);
     }
     if (next.unsupported && pres.audience !== "process") next.caption = `${next.caption || "Step"} — Unsupported`;
@@ -570,10 +619,23 @@ const FlowIR = {
       const next = this._normalizeBranch(branch, index);
       const target = src.steps.find((item) => item.id === next.target);
       next.targetLabel = target ? this._plainAction(target) || target.label : "";
+      next.scheme = this.branchScheme(next, index);
       next.tone = this.branchTone(next, index);
+      if (next.footer) next.footer = String(next.footer).trim();
       if (!next.detail && next.targetLabel) next.detail = next.targetLabel;
       return next;
     });
+  },
+
+  stepNumbers(model) {
+    const presented = this.present(model);
+    return presented.ok ? presented.view.numbers || {} : {};
+  },
+
+  defaultBranchFooter(branch) {
+    if (branch?.ends) return "Flow ends here";
+    if (branch?.targetNum) return `Continues to step ${branch.targetNum}`;
+    return "Continues below";
   },
 
   fieldRows(fields) {

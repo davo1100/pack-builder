@@ -664,6 +664,7 @@ const FlowStudio = {
 
   _renderSteps() {
     this._catalogMemo = new Map();
+    this._numberCache = FlowIR.stepNumbers(this.model);
     const host = document.getElementById("flow-steps");
     const platform = this.model.presentation.platform;
     const drawnIds = new Set(
@@ -731,9 +732,25 @@ const FlowStudio = {
       const kinds = FlowIR.CONDITION_KINDS.map(
         (kind) => `<option value="${kind}"${(step.kind || "business") === kind ? " selected" : ""}>${FlowIR.conditionKindLabel(kind)}</option>`
       ).join("");
+      const numbers = this._numberCache || FlowIR.stepNumbers(this.model);
+      const refOpts = this.model.steps
+        .filter((item) => item.id !== step.id)
+        .map((item) => {
+          const num = numbers[item.id];
+          const prefix = num != null ? `${num} · ` : "";
+          return `<option value="${this._esc(item.id)}"${item.id === step.ref ? " selected" : ""}>${this._esc(prefix + this._stepChoiceLabel(item))}</option>`;
+        })
+        .join("");
       return `<div class="flow-row">
         <input data-sfield="label" value="${this._esc(step.label || "")}" placeholder="Card valid?">
         <select data-sfield="kind" aria-label="Condition kind">${kinds}</select>
+      </div>
+      <div class="flow-row">
+        <input data-sfield="heading" value="${this._esc(step.heading || "")}" placeholder="Decision" aria-label="Condition heading">
+        <select data-sfield="ref" aria-label="Link condition to step">
+          <option value="">No linked step</option>
+          ${refOpts}
+        </select>
       </div>
       ${this._branchesEditor(step)}`;
     }
@@ -769,18 +786,37 @@ const FlowStudio = {
   _branchesEditor(step) {
     const branches = Array.isArray(step.branches) && step.branches.length ? step.branches : FlowIR.defaultBranches();
     if (!step.branches?.length) step.branches = branches;
+    const numbers = this._numberCache || FlowIR.stepNumbers(this.model);
     const rows = branches
       .map((branch, index) => {
         const targets = this.model.steps
           .filter((item) => item.id !== step.id)
-          .map((item) => `<option value="${this._esc(item.id)}"${item.id === branch.target ? " selected" : ""}>${this._esc(this._stepChoiceLabel(item))}</option>`)
+          .map((item) => {
+            const num = numbers[item.id];
+            const prefix = num != null ? `${num} · ` : "";
+            return `<option value="${this._esc(item.id)}"${item.id === branch.target ? " selected" : ""}>${this._esc(prefix + this._stepChoiceLabel(item))}</option>`;
+          })
           .join("");
         const methodSelect = ["", ...FlowIR.METHODS]
           .map((method) => `<option value="${method}"${(branch.method || "") === method ? " selected" : ""}>${method || "—"}</option>`)
           .join("");
+        const scheme = FlowIR.branchScheme(branch, index);
+        const schemeSelect = FlowIR.BRANCH_SCHEMES.map(
+          (value) =>
+            `<option value="${value}"${scheme === value ? " selected" : ""}>${FlowIR.branchSchemeLabel(value)}</option>`
+        ).join("");
+        const targetNum = branch.target ? numbers[branch.target] : null;
+        const footerPlaceholder = branch.ends
+          ? "Flow ends here"
+          : targetNum
+            ? `Continues to step ${targetNum}`
+            : "Continues below";
         return `<div class="flow-branch-card" data-bindex="${index}">
           <div class="flow-row">
             <input data-bfield="label" value="${this._esc(branch.label || "")}" placeholder="Yes" aria-label="Outcome label">
+            <select class="flow-branch-scheme" data-bfield="scheme" aria-label="Outcome colour and icon" title="Colour and icon">
+              ${schemeSelect}
+            </select>
             <input data-bfield="detail" value="${this._esc(branch.detail || "")}" placeholder="What happens on this path" aria-label="Outcome detail">
             <button type="button" data-bremove>Remove</button>
           </div>
@@ -795,6 +831,7 @@ const FlowStudio = {
               <option value="">No linked step</option>
               ${targets}
             </select>
+            <input data-bfield="footer" value="${this._esc(branch.footer || "")}" placeholder="${this._esc(footerPlaceholder)}" aria-label="Continue or end text">
           </div>
         </div>`;
       })
@@ -805,7 +842,7 @@ const FlowStudio = {
         <button type="button" data-add-branch>Add outcome</button>
       </div>
       ${rows}
-      <p class="flow-filter-note">Yes paths usually continue below. No paths can show a rollback call and end the flow.</p>
+      <p class="flow-filter-note">Set Proceed / Stop / Pending manually. Link an outcome to a numbered step, and edit the continues / ends line if you want custom wording.</p>
     </div>`;
   },
 
@@ -1046,6 +1083,18 @@ const FlowStudio = {
     }
     if (field === "to") step.to = value;
     if (field === "label") step.label = value;
+    if (field === "heading") {
+      const text = String(value || "").trim();
+      if (text) step.heading = text;
+      else delete step.heading;
+    }
+    if (field === "ref") {
+      if (value) step.ref = value;
+      else delete step.ref;
+      this._renderSteps();
+      this._schedulePreview();
+      return;
+    }
     if (field === "subtitle") step.subtitle = value;
     if (field === "mark") step.mark = value || undefined;
     if (field === "kind") step.kind = value;
@@ -1087,6 +1136,12 @@ const FlowStudio = {
     }
     if (event.target.dataset.bfield) {
       this._onBranchField(step, event.target);
+      const key = event.target.dataset.bfield;
+      if (key === "target" || key === "ends" || key === "scheme") {
+        this._renderSteps();
+        this._schedulePreview();
+        return;
+      }
       if (event.type === "change" && this._isTextControl(event.target)) return;
       this._schedulePreview();
       return;
@@ -1152,6 +1207,10 @@ const FlowStudio = {
     const key = input.dataset.bfield;
     const value = input.type === "checkbox" ? input.checked : input.value;
     if (key === "label") step.branches[index].label = value;
+    if (key === "scheme") {
+      const scheme = FlowIR.branchScheme({ scheme: value }, index);
+      step.branches[index].scheme = scheme;
+    }
     if (key === "detail") {
       const text = String(value || "").trim();
       if (text) step.branches[index].detail = text;
@@ -1177,6 +1236,11 @@ const FlowStudio = {
       if (value) step.branches[index].ends = true;
       else delete step.branches[index].ends;
     }
+    if (key === "footer") {
+      const text = String(value || "").trim();
+      if (text) step.branches[index].footer = text;
+      else delete step.branches[index].footer;
+    }
     if (key === "target") step.branches[index].target = value;
   },
 
@@ -1185,7 +1249,14 @@ const FlowStudio = {
     const step = this.model.steps.find((item) => item.id === card?.dataset.step);
     if (event.target.closest("[data-add-branch]") && step) {
       step.branches = step.branches || FlowIR.defaultBranches();
-      step.branches.push({ id: FlowIR.uid("b"), label: `Path ${step.branches.length + 1}`, target: this._nextConditionTarget(step), when: "", ends: false });
+      step.branches.push({
+        id: FlowIR.uid("b"),
+        label: `Path ${step.branches.length + 1}`,
+        target: this._nextConditionTarget(step),
+        when: "",
+        ends: false,
+        scheme: "pending",
+      });
       this._renderSteps();
       this._afterStructure();
       return;

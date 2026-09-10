@@ -1942,6 +1942,12 @@ h2.section:first-child {
   flex: 0 1 88px;
 }
 
+.flow-branch-card select[data-bfield="scheme"],
+.flow-branch-scheme {
+  flex: 0 0 118px;
+  max-width: 130px;
+}
+
 .flow-branch-card input[data-bfield="detail"] {
   flex: 1 1 160px;
 }
