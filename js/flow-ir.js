@@ -302,10 +302,14 @@ const FlowIR = {
   },
 
   branchScheme(branch, index) {
-    const raw = String(branch?.scheme || branch?.style || branch?.tone || "").trim().toLowerCase();
-    if (raw === "yes" || raw === "ok" || raw === "success" || raw === "continue") return "proceed";
-    if (raw === "no" || raw === "fail" || raw === "error" || raw === "end") return "stop";
-    if (this.BRANCH_SCHEMES.includes(raw)) return raw;
+    const explicit = String(branch?.scheme || branch?.style || "").trim().toLowerCase();
+    if (explicit === "yes" || explicit === "ok" || explicit === "success" || explicit === "continue") return "proceed";
+    if (explicit === "no" || explicit === "fail" || explicit === "error" || explicit === "end") return "stop";
+    if (this.BRANCH_SCHEMES.includes(explicit)) return explicit;
+    const label = String(branch?.label || "").trim().toLowerCase();
+    if (/^(pending|wait|hold|later|defer)/i.test(label)) return "pending";
+    if (/^(yes|y|true|ok|success|pass|continue|proceed)/i.test(label)) return "proceed";
+    if (/^(no|n|false|fail|error|end|stop|rollback)/i.test(label)) return "stop";
     if (index === 0) return "proceed";
     if (index === 1) return "stop";
     return "pending";

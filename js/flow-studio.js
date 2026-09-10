@@ -1210,6 +1210,8 @@ const FlowStudio = {
     if (key === "scheme") {
       const scheme = FlowIR.branchScheme({ scheme: value }, index);
       step.branches[index].scheme = scheme;
+      delete step.branches[index].tone;
+      delete step.branches[index].style;
     }
     if (key === "detail") {
       const text = String(value || "").trim();

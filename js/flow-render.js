@@ -1046,7 +1046,10 @@ const FlowRender = {
   },
 
   _conditionBranchMetrics(branch, index) {
-    const scheme = branch.scheme || FlowIR.branchScheme(branch, index);
+    const scheme =
+      (FlowIR.BRANCH_SCHEMES || []).includes(String(branch.scheme || "").toLowerCase())
+        ? String(branch.scheme).toLowerCase()
+        : FlowIR.branchScheme(branch, index);
     const tone = branch.tone || FlowIR.branchTone(branch, index);
     const label = String(branch.label || (scheme === "stop" ? "No" : scheme === "pending" ? "Pending" : "Yes"));
     const detail = String(branch.detail || branch.targetLabel || "").trim();
@@ -1168,11 +1171,12 @@ const FlowRender = {
   },
 
   _branchSchemeStyle(scheme) {
-    if (scheme === "stop") {
+    const key = String(scheme || "").trim().toLowerCase();
+    if (key === "stop" || key === "no") {
       return { tint: "#FCE2E8", tag: "#E11D48", tip: "#E11D48", icon: "stop" };
     }
-    if (scheme === "pending") {
-      return { tint: "#FEF3C7", tag: "#D97706", tip: "#9A6207", icon: "pending" };
+    if (key === "pending" || key === "wait") {
+      return { tint: "#FEF3C7", tag: "#F97316", tip: "#C2410C", icon: "pending" };
     }
     return { tint: "#E1F5E9", tag: "#16A34A", tip: "#0E6E33", icon: "proceed" };
   },
@@ -1194,14 +1198,23 @@ const FlowRender = {
     return `<path d="M${cx - 3.8} ${cy + 0.2} l2.6 2.6 5.2-5.2" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`;
   },
 
+  _resolveBranchScheme(branch, index) {
+    const explicit = String(branch?.scheme || "").trim().toLowerCase();
+    if (FlowIR.BRANCH_SCHEMES?.includes(explicit)) return explicit;
+    if (typeof FlowIR.branchScheme === "function") return FlowIR.branchScheme(branch, index);
+    if (index === 0) return "proceed";
+    if (index === 1) return "stop";
+    return "pending";
+  },
+
   _conditionBranch(left, top, w, branch, index) {
-    const scheme = branch.scheme || FlowIR.branchScheme?.(branch, index) || (index === 0 ? "proceed" : index === 1 ? "stop" : "pending");
+    const scheme = this._resolveBranchScheme(branch, index);
     const style = this._branchSchemeStyle(scheme);
     const padX = 15;
     const padY = 10;
     const gradId = this.uid("cg");
-    let html = `<g>`;
-    html += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${style.tint}"/><stop offset="62%" stop-color="${style.tint}" stop-opacity="0"/></linearGradient></defs>`;
+    let html = `<g data-scheme="${scheme}">`;
+    html += `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${style.tint}" stop-opacity="1"/><stop offset="62%" stop-color="${style.tint}" stop-opacity="0"/></linearGradient></defs>`;
     html += `<rect x="${left}" y="${top}" width="${w}" height="${branch.h}" fill="url(#${gradId})"/>`;
     if (index > 0) html += `<line x1="${left}" y1="${top}" x2="${left + w}" y2="${top}" stroke="#E7E3F2"/>`;
     const tagLabel = String(branch.label || (scheme === "stop" ? "No" : scheme === "pending" ? "Pending" : "Yes")).toUpperCase();
@@ -1241,16 +1254,16 @@ const FlowRender = {
       ty += 18;
     }
     if (branch.ends) {
-      const lines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Flow ends here"];
-      lines.forEach((line, index) => {
-        const prefix = index === 0 ? "▪ " : "";
-        html += `<text x="${bodyX}" y="${ty + 2 + index * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
+      const footerLines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Flow ends here"];
+      footerLines.forEach((line, lineIndex) => {
+        const prefix = lineIndex === 0 ? "▪ " : "";
+        html += `<text x="${bodyX}" y="${ty + 2 + lineIndex * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
       });
     } else {
-      const lines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Continues below"];
-      lines.forEach((line, index) => {
-        const prefix = index === 0 ? "→ " : "";
-        html += `<text x="${bodyX}" y="${ty + 2 + index * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
+      const footerLines = branch.footerLines?.length ? branch.footerLines : [branch.footer || "Continues below"];
+      footerLines.forEach((line, lineIndex) => {
+        const prefix = lineIndex === 0 ? "→ " : "";
+        html += `<text x="${bodyX}" y="${ty + 2 + lineIndex * 12}" font-family="Arial, sans-serif" font-size="9" font-weight="700" letter-spacing="0.04em" fill="${style.tip}">${this.escape(prefix + String(line).toUpperCase())}</text>`;
       });
     }
     html += `</g>`;
