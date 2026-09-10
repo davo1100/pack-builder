@@ -820,11 +820,6 @@ const FlowRender = {
     gaps.forEach((gap, index) => xsArr.push(xsArr[index] + gap));
     let minX = xsArr[0] - boxW / 2;
     let maxX = xsArr[n - 1] + boxW / 2;
-    const spanBox = (actorId, size) => {
-      const i = indexOf[actorId] ?? 0;
-      minX = Math.min(minX, xsArr[i] - size.w / 2);
-      maxX = Math.max(maxX, xsArr[i] + size.w / 2);
-    };
     rows.forEach((row) => {
       if (row.kind === "condition") {
         const i = indexOf[row.step.actor || row.step.from] ?? 0;
@@ -842,12 +837,23 @@ const FlowRender = {
       const step = row.step;
       const size = row.size;
       if (step.type === "process" && !FlowIR.isProcessHop(step)) {
-        spanBox(step.actor || step.from, size);
+        // Local process pills sit to the right of the lane (loop stub + box), not centred on it.
+        const i = indexOf[step.actor || step.from] ?? 0;
+        const stub = 46;
+        minX = Math.min(minX, xsArr[i] - 24);
+        maxX = Math.max(maxX, xsArr[i] + stub + size.w);
         return;
       }
       const from = indexOf[step.from];
       const to = indexOf[step.to];
       if (from == null || to == null) return;
+      if (from === to) {
+        // Self-message loops bulge to the right of the lane.
+        const loop = 48;
+        minX = Math.min(minX, xsArr[from] - 24);
+        maxX = Math.max(maxX, xsArr[from] + loop + Math.max(size.w * 0.35, 40));
+        return;
+      }
       const cx = (xsArr[from] + xsArr[to]) / 2;
       minX = Math.min(minX, cx - size.w / 2);
       maxX = Math.max(maxX, cx + size.w / 2);
