@@ -1,1 +1,5 @@
-# Pack Builder uses the Python standard library only.
+# Pack Builder is otherwise Python standard library only.
+# Pillow is used solely to shrink oversized embedded images (resize + lossless/
+# high-quality re-encode) so downloaded packs stay small; if it's ever missing,
+# compression is skipped and images are embedded unmodified.
+Pillow>=10

@@ -30,5 +30,5 @@ Free Render instances sleep when idle; the first visit after a pause can take ab
 
 ## Notes
 
-- No extra Python packages.
+- One optional package: Pillow, used only to shrink oversized embedded images on import. If it isn't installed, the app still runs — images just aren't compressed.
 - The hosted app only serves the builder UI (`studio.html`, `css/`, `js/`, `data/`, `assets/`). It does not expose `source/` or other project files.

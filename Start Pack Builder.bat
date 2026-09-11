@@ -25,6 +25,14 @@ if not defined PYCMD (
   exit /b 1
 )
 
+echo Installing/updating dependencies...
+%PYCMD% -m pip install -q -r requirements.txt
+if errorlevel 1 (
+  echo Could not install optional dependencies ^(no internet? offline install?^).
+  echo Continuing without them - image downloads just won't be shrunk.
+  echo.
+)
+
 echo Starting pack builder...
 echo Keep this window open while you work. Close it to stop.
 echo.

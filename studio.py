@@ -68,7 +68,11 @@ class StudioHandler(SimpleHTTPRequestHandler):
             pass
 
     def end_headers(self) -> None:
-        if is_public_path(urlparse(self.path).path):
+        # self.path isn't set yet if send_error() fires from parse_request()
+        # itself (e.g. a malformed request line/version) before the request
+        # line is parsed, so don't assume it's there.
+        path = getattr(self, "path", None)
+        if path is not None and is_public_path(urlparse(path).path):
             # Static assets: let the browser revalidate via If-Modified-Since
             # (send_head() already sets Last-Modified) instead of re-downloading
             # the full file on every load.
@@ -119,7 +123,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             return self._send_json({"error": "Invalid Content-Length"}, 400)
-        if length > 80_000_000:
+        if length < 0 or length > 80_000_000:
             return self._send_json({"error": "Payload too large"}, 413)
         raw = self.rfile.read(length)
         try:

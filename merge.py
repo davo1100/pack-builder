@@ -1,7 +1,9 @@
 """Merge dropped HTML flow specs into one client-ready page."""
 from __future__ import annotations
 
+import base64
 import html as html_lib
+import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -243,11 +245,11 @@ def language_switcher_html(settings: Settings) -> str:
       </div>"""
 
 
-def matching_div_end(html: str, start: int) -> int:
-    return matching_tag_end(html, start, "div")
+def matching_div_end(html: str, start: int, lower_html: str | None = None) -> int:
+    return matching_tag_end(html, start, "div", lower_html)
 
 
-def matching_tag_end(html: str, start: int, tag: str) -> int:
+def matching_tag_end(html: str, start: int, tag: str, lower_html: str | None = None) -> int:
     tag = tag.lower()
     if not _is_tag_open(html, start, tag):
         raise ValueError(f"start must point at <{tag}")
@@ -258,8 +260,11 @@ def matching_tag_end(html: str, start: int, tag: str) -> int:
     # Lower-case the string once up front instead of on every _find_* call
     # below — matching_tag_end can otherwise re-scan the whole document
     # (which may be large: a fully-assembled multi-chapter pack) twice per
-    # nesting level it walks through.
-    lower_html = html.lower()
+    # nesting level it walks through. Callers that scan the same string
+    # repeatedly (e.g. once per chapter) can pass an already-lowered copy
+    # in to skip re-lowering it here too.
+    if lower_html is None:
+        lower_html = html.lower()
     while pos < len(html) and depth:
         next_open = _find_tag_open(html, pos, tag, lower_html)
         next_close = _find_close_tag(lower_html, pos, tag)
@@ -329,6 +334,11 @@ def restyle(html: str) -> str:
 def wrap_code_blocks(html: str) -> str:
     out = []
     i = 0
+    # Precompute once: code_container_end/_already_in_code_fold each used to
+    # re-lower the whole (or a growing prefix of the) string on every code
+    # block found. html isn't mutated in this loop, so one lower-cased copy
+    # can be reused for all of them.
+    lower_html = html.lower()
     while True:
         match = CODE_CONTAINER_OPEN.search(html, i)
         if not match:
@@ -336,13 +346,13 @@ def wrap_code_blocks(html: str) -> str:
             break
         start = match.start()
         out.append(html[i:start])
-        end = code_container_end(html, start)
+        end = code_container_end(html, start, lower_html)
         if end <= start:
             out.append(html[start : start + 1])
             i = start + 1
             continue
         block = html[start:end]
-        if _already_in_code_fold(html, start):
+        if _already_in_code_fold(lower_html, start):
             out.append(block)
             i = end
             continue
@@ -357,26 +367,28 @@ def wrap_code_blocks(html: str) -> str:
     return "".join(out)
 
 
-def code_container_end(html: str, start: int) -> int:
-    end = matching_div_end(html, start)
+def code_container_end(html: str, start: int, lower_html: str | None = None) -> int:
+    if lower_html is None:
+        lower_html = html.lower()
+    end = matching_div_end(html, start, lower_html)
     inner = html[start + 1 : end]
     nested = CODE_CONTAINER_OPEN.search(inner)
     if not nested:
         return end
-    pre_close = html.lower().find("</pre>", start)
+    pre_close = lower_html.find("</pre>", start)
     nested_at = start + 1 + nested.start()
     if pre_close == -1 or pre_close > nested_at:
         return end
-    close = html.lower().find("</div>", pre_close)
+    close = lower_html.find("</div>", pre_close)
     return close + 6 if close != -1 else end
 
 
-def _already_in_code_fold(html: str, start: int) -> bool:
-    before = html[:start]
-    fold = max(before.lower().rfind("class=\"code-fold\""), before.lower().rfind("class='code-fold'"))
+def _already_in_code_fold(lower_html: str, start: int) -> bool:
+    before = lower_html[:start]
+    fold = max(before.rfind('class="code-fold"'), before.rfind("class='code-fold'"))
     if fold == -1:
         return False
-    return "</details>" not in before[fold:].lower()
+    return "</details>" not in before[fold:]
 
 
 def flatten_nested_code_folds(html: str) -> str:
@@ -715,10 +727,18 @@ def prefix_ids(html: str, prefix: str) -> str:
         return f'for="{prefix}-{value}"'
 
     html = re.sub(r'(?<![\w-])for="([^"]+)"', for_sub, html)
-    for orig in original_ids:
-        if orig.startswith(prefix + "-") or is_cross_chapter(orig):
-            continue
-        html = html.replace(f"url(#{orig})", f"url(#{prefix}-{orig})")
+    to_prefix = {
+        orig for orig in original_ids if not orig.startswith(prefix + "-") and not is_cross_chapter(orig)
+    }
+    if to_prefix:
+        # A single combined pass instead of one html.replace() scan per id:
+        # each id's url(#...) reference used to re-scan the whole (possibly
+        # large) chapter body on its own.
+        def url_sub(m: re.Match) -> str:
+            value = m.group(1)
+            return f"url(#{prefix}-{value})" if value in to_prefix else m.group(0)
+
+        html = re.sub(r"url\(#([^)]*)\)", url_sub, html)
     return html
 
 
@@ -1039,8 +1059,13 @@ def split_built_pack(html: str, filename: str = "documentation.html") -> tuple[l
     used_names: set[str] = set()
     used_nums: set[str] = set()
     pos = 0
+    # This can be the whole built pack (multi-MB for a large deliverable),
+    # scanned once per chapter below. Lower-case it once up front instead of
+    # letting _find_tag_open/matching_tag_end each re-lower the full string
+    # on every iteration.
+    lower_html = html.lower()
     while True:
-        start = _find_tag_open(html, pos, "section")
+        start = _find_tag_open(html, pos, "section", lower_html)
         if start == -1:
             break
         gt = html.find(">", start)
@@ -1050,8 +1075,9 @@ def split_built_pack(html: str, filename: str = "documentation.html") -> tuple[l
         if not re.search(r'\bclass="[^"]*\bchapter\b', open_tag, re.I):
             pos = start + 8
             continue
-        end = matching_tag_end(html, start, "section")
+        end = matching_tag_end(html, start, "section", lower_html)
         inner = html[gt + 1 : end - len("</section>")].strip()
+        inner, chapter_data_uris = _hide_data_uris(inner)
         inner = _clean_imported_body(_strip_chapter_nav(inner))
         section_id = _attr(open_tag, "id")
         role = "overview" if section_id == "overview" else "chapter"
@@ -1080,15 +1106,17 @@ def split_built_pack(html: str, filename: str = "documentation.html") -> tuple[l
                 num = f"{seq:02d}"
             name = _unique_pack_filename(num, title, used_names)
         used_nums.add(num)
+        draft = detect_draft(inner)
+        body = _restore_data_uris(undouble_amp(sanitize_code_blocks(inner)), chapter_data_uris)
         docs.append(
             Doc(
                 filename=name,
                 title=decode_entities(title),
                 role=role,
                 include=True,
-                draft=detect_draft(inner),
+                draft=draft,
                 num=num,
-                body=undouble_amp(sanitize_code_blocks(inner)),
+                body=body,
                 id=section_id or "",
             )
         )
@@ -1166,11 +1194,18 @@ def ingest_upload(
     from word import is_word_name
 
     if is_word_name(name) or is_slides_name(name):
-        return [ingest_file(name, data=data, asset_dir=asset_dir, images=images)], None
-    html = raw or ""
-    if is_built_pack(html):
-        return split_built_pack(html, name)
-    return [ingest_file(name, raw=html, asset_dir=asset_dir, images=images)], None
+        docs, settings = [ingest_file(name, data=data, asset_dir=asset_dir, images=images)], None
+    else:
+        html = raw or ""
+        if is_built_pack(html):
+            docs, settings = split_built_pack(html, name)
+        else:
+            docs, settings = [ingest_file(name, raw=html, asset_dir=asset_dir, images=images)], None
+    # Shrink oversized embedded images once here, whatever the source, rather
+    # than paying to re-scan/re-encode them on every subsequent preview/build.
+    for doc in docs:
+        doc.body = compress_embedded_images(doc.body)
+    return docs, settings
 
 
 def assign_ids(docs: list[Doc]) -> None:
@@ -1634,7 +1669,15 @@ def sync_overview(docs: list[Doc], settings: Settings | None = None) -> tuple[Do
 
 
 def prepare_body(body: str, doc: Doc, mapping: dict[str, str], allowed: set[str], chapter_count: int) -> str:
-    html = rewrite_file_links(body, mapping)
+    # Chapters can carry multi-megabyte embedded images as base64 data URIs.
+    # None of the regex passes below ever need to look inside one (the
+    # base64 alphabet can't contain the quotes/angle-brackets any of these
+    # patterns match on), but every pass still has to scan past those bytes
+    # to find its real matches. Swap them out for short placeholders first
+    # so a doc's actual markup — not its embedded images — sets the cost of
+    # everything that follows, then restore them once at the end.
+    html, data_uris = _hide_data_uris(body)
+    html = rewrite_file_links(html, mapping)
     if doc.role == "overview":
         html = prune_cards(html, allowed)
         html = update_doc_count(html, chapter_count)
@@ -1647,7 +1690,94 @@ def prepare_body(body: str, doc: Doc, mapping: dict[str, str], allowed: set[str]
     html = prefix_ids(html, doc.id)
     if doc.id == "overview":
         html = html.replace('id="overview-overview"', 'id="overview-intro"')
+    return _restore_data_uris(html, data_uris)
+
+
+DATA_URI_RE = re.compile(r"data:[\w.+-]+/[\w.+-]+(?:;charset=[\w-]+)?;base64,[A-Za-z0-9+/=]+")
+_DATA_URI_TOKEN = "\x00du{}\x00"
+
+
+def _hide_data_uris(html: str) -> tuple[str, list[str]]:
+    stash: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        stash.append(m.group(0))
+        return _DATA_URI_TOKEN.format(len(stash) - 1)
+
+    return DATA_URI_RE.sub(repl, html), stash
+
+
+def _restore_data_uris(html: str, stash: list[str]) -> str:
+    for i, value in enumerate(stash):
+        html = html.replace(_DATA_URI_TOKEN.format(i), value)
     return html
+
+
+# Raster images pasted or embedded into a doc are often far larger than a
+# documentation page ever displays them (full-resolution/retina screenshots
+# in a column capped at --content-max-width, currently 1100px). Shrinking
+# anything bigger than a generous on-screen ceiling — and losslessly
+# re-compressing the rest — cuts download size without a visible quality
+# difference. Kept deliberately conservative: no lossy re-encoding, and any
+# image that doesn't actually get smaller is left untouched.
+IMAGE_MAX_DIMENSION = 1800
+# PNG: resize + lossless re-compress. JPEG: resize + re-save at quality=90,
+# the standard "visually lossless" ceiling. Anything else (WebP, SVG, GIF, ...)
+# is left alone rather than risk a format-specific lossy default.
+COMPRESSIBLE_IMAGE_MIME = {"image/png": "PNG", "image/jpeg": "JPEG"}
+_MIN_COMPRESSIBLE_BYTES = 40_000
+
+
+def compress_embedded_images(html: str) -> str:
+    if "base64," not in html:
+        return html
+    return DATA_URI_RE.sub(lambda m: _compress_data_uri(m.group(0)), html)
+
+
+def _compress_data_uri(data_uri: str) -> str:
+    header, sep, b64 = data_uri.partition(",")
+    if not sep:
+        return data_uri
+    mime = header[len("data:") :].split(";", 1)[0].strip().lower()
+    fmt = COMPRESSIBLE_IMAGE_MIME.get(mime)
+    if fmt is None:
+        return data_uri
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (ValueError, TypeError):
+        return data_uri
+    if len(raw) < _MIN_COMPRESSIBLE_BYTES:
+        return data_uri
+    try:
+        from PIL import Image
+    except ImportError:
+        return data_uri
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            if fmt == "JPEG" and max(img.size) > IMAGE_MAX_DIMENSION:
+                # Let libjpeg decode straight to a reduced DCT scale instead
+                # of fully decoding a huge screenshot just to immediately
+                # throw most of those pixels away in the resize below.
+                img.draft("RGB", (IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION))
+            img.load()
+            if getattr(img, "is_animated", False):
+                return data_uri  # don't flatten an animated PNG
+            if max(img.size) > IMAGE_MAX_DIMENSION:
+                img = img.copy()
+                img.thumbnail((IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION), Image.LANCZOS)
+            if fmt == "JPEG" and img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            out = io.BytesIO()
+            save_kwargs = {"optimize": True}
+            if fmt == "JPEG":
+                save_kwargs["quality"] = 90
+            img.save(out, format=fmt, **save_kwargs)
+    except Exception:
+        return data_uri
+    encoded = out.getvalue()
+    if len(encoded) >= len(raw):
+        return data_uri
+    return f"data:{mime};base64,{base64.b64encode(encoded).decode('ascii')}"
 
 
 def repair_journey_runtime_styles(html: str) -> str:
@@ -1770,7 +1900,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     if overview:
         overview_section = f"""      <section class="chapter" id="overview">
         {prepared_overview}
-        <p class="site-footer">{html_lib.escape(settings.footer)}</p>
+        <p class="site-footer">{settings.footer}</p>
       </section>"""
     elif chapters:
         overview_section = ""
@@ -1943,19 +2073,25 @@ def build_from_payload(data: dict, css: str | None = None) -> str:
     return build_pack(docs_from_payload(data), settings_from_payload(data), css)
 
 
-_client_css_cache: dict = {}
+_client_css_cache: tuple[float, str] | None = None
 
 
 def load_client_css() -> str:
     # Every /api/build call used to re-read+decode this file from disk even
     # though it only changes between deploys. Cache by mtime so local edits
-    # still take effect without a restart.
+    # still take effect without a restart. Reassigning the module global in
+    # one step (rather than mutating a shared dict's keys) keeps concurrent
+    # ThreadingHTTPServer requests from ever observing a mismatched
+    # (mtime, text) pair; a race just means two threads both re-read once.
+    global _client_css_cache
     path = ROOT / "css" / "styles.css"
     mtime = path.stat().st_mtime
-    if _client_css_cache.get("mtime") != mtime:
-        _client_css_cache["text"] = path.read_text(encoding="utf-8")
-        _client_css_cache["mtime"] = mtime
-    return _client_css_cache["text"]
+    cached = _client_css_cache
+    if cached is None or cached[0] != mtime:
+        text = path.read_text(encoding="utf-8")
+        _client_css_cache = (mtime, text)
+        return text
+    return cached[1]
 
 
 def _inline_script(js: str) -> str:
