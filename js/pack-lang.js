@@ -748,6 +748,69 @@
     return String(h);
   }
 
+  function ingestMapsFromHtml(html) {
+    const text = String(html || "");
+    const marker = "window.PACK_I18N=";
+    const at = text.indexOf(marker);
+    if (at === -1) return;
+    const start = at + marker.length;
+    if (text[start] !== "{") return;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inStr) {
+        if (esc) {
+          esc = false;
+          continue;
+        }
+        if (ch === "\\") {
+          esc = true;
+          continue;
+        }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        continue;
+      }
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end === -1) return;
+    try {
+      const pack = JSON.parse(text.slice(start, end));
+      global.PACK_I18N = pack;
+      ingestPackMap();
+    } catch (err) {
+      /* ignore malformed pack maps */
+    }
+  }
+
+  function buildEmbedPayload(targets) {
+    const mapsOut = {};
+    targets.forEach((lang) => {
+      const extra = extraTranslations(lang);
+      if (Object.keys(extra).length) mapsOut[lang] = extra;
+    });
+    const payload = {
+      source: SOURCE,
+      targets,
+      maps: mapsOut,
+    };
+    if (mapsOut.fr) payload.fr = mapsOut.fr;
+    return payload;
+  }
+
   async function warmUp(targets, onStatus) {
     const list = normalizeTargets(targets);
     if (!list.length) return;
@@ -762,10 +825,23 @@
   }
 
   async function embedTranslations(html, onStatus, options) {
+    ingestMapsFromHtml(html);
     ingestPackMap();
     const targets = normalizeTargets(options?.targets || activeTargets || ["fr"]);
     if (!targets.length) return html;
     activeTargets = targets;
+
+    // Fast export path: keep existing maps + seed phrases, do not run machine translation.
+    // Readers translate missing strings when they switch language.
+    if (options?.fast) {
+      onStatus?.("Preparing language switcher…");
+      const payload = buildEmbedPayload(targets);
+      global.__PACK_I18N_CACHE = {
+        key: "fast|" + targets.join(",") + "|" + Object.keys(payload.maps || {}).length,
+        payload,
+      };
+      return injectPayload(html, payload);
+    }
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
@@ -778,7 +854,10 @@
     // Warm translators in parallel first (fast language-pack download).
     await warmUp(targets, onStatus);
 
+    const budgetMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 0;
+    const started = Date.now();
     for (let i = 0; i < targets.length; i++) {
+      if (budgetMs && Date.now() - started > budgetMs) break;
       const lang = targets[i];
       const missing = strings.filter((text) => !maps[lang][text]);
       if (!missing.length) continue;
@@ -786,22 +865,11 @@
       onStatus?.("Adding " + label + " translation…");
       await translateMissing(lang, missing, (message, percent) => {
         onStatus?.(percent != null ? message + " " + percent + "%" : message);
-      }, false);
+      }, Boolean(options?.readyOnly));
     }
 
-    const mapsOut = {};
-    targets.forEach((lang) => {
-      const extra = extraTranslations(lang);
-      if (Object.keys(extra).length) mapsOut[lang] = extra;
-    });
-    const payload = {
-      source: SOURCE,
-      targets,
-      maps: mapsOut,
-    };
-    // Keep legacy fr key for older readers
-    if (mapsOut.fr) payload.fr = mapsOut.fr;
-    if (!Object.keys(mapsOut).length && !targets.length) return html;
+    const payload = buildEmbedPayload(targets);
+    if (!Object.keys(payload.maps || {}).length && !targets.length) return html;
     global.__PACK_I18N_CACHE = { key: cacheKey, payload };
     return injectPayload(html, payload);
   }

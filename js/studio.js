@@ -2388,6 +2388,21 @@ function patchPackChrome(html) {
     /(<p class="site-footer">)[\s\S]*?(<\/p>)/i,
     `$1${escapeHtml(s.footer)}$2`
   );
+  // Sync language switcher targets with Design settings.
+  if (s.translation_enabled && s.languages?.length) {
+    const targets = s.languages.join(",");
+    if (/class="[^"]*\bpack-lang\b[^"]*"[^>]*data-targets="/i.test(out)) {
+      out = out.replace(
+        /(class="[^"]*\bpack-lang\b[^"]*"[^>]*data-targets=")[^"]*(")/i,
+        `$1${escapeAttr(targets)}$2`
+      );
+    } else if (/data-targets="[^"]*"[^>]*class="[^"]*\bpack-lang\b/i.test(out)) {
+      out = out.replace(
+        /(data-targets=")[^"]*("[^>]*class="[^"]*\bpack-lang\b)/i,
+        `$1${escapeAttr(targets)}$2`
+      );
+    }
+  }
   out = out.replace(/<style\b[^>]*\bid=["']pack-builder-theme-live["'][^>]*>[\s\S]*?<\/style>/gi, "");
   return out;
 }
@@ -2637,58 +2652,72 @@ function loadEditor() {
 async function downloadPack() {
   flushEditor();
   setStatus("Creating file…");
-  const filename = settingsPayload().output_filename;
-  const fallbackHtml = () => {
-    if (canAssemblePreview(state.lastHtml)) return withLiveTheme(assemblePreviewHtml(state.lastHtml));
-    if (state.lastHtml) return withLiveTheme(state.lastHtml);
-    return "";
-  };
-  try {
-    const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
-    if (!res.ok) {
-      const html = fallbackHtml();
-      if (html) {
-        await downloadTranslatedPack(html, filename);
-        setStatus("Downloaded a local assemble with your edits; server rebuild timed out", "error");
-        return;
-      }
-      setStatus(data.error || "Download failed", "error");
-      return;
+  const filename = settingsPayload().output_filename || "documentation.html";
+
+  let html = "";
+  let source = "";
+
+  // Prefer local assemble for large imported packs — seconds instead of a timed-out /api/build.
+  if (canAssemblePreview(state.lastHtml)) {
+    try {
+      html = withLiveTheme(assemblePreviewHtml(state.lastHtml));
+      source = "local";
+    } catch (err) {
+      console.warn("Local assemble failed", err);
     }
-    state.lastHtml = data.html;
-    state.useImportedPreview = false;
-    await downloadTranslatedPack(data.html, data.filename || filename);
-    setStatus("Downloaded " + (data.filename || filename), "ok");
-  } catch (err) {
-    const html = fallbackHtml();
-    if (html) {
-      await downloadTranslatedPack(html, filename);
-      setStatus("Downloaded a local assemble with your edits; server rebuild timed out", "error");
-      return;
-    }
-    setStatus(err.message || "Download failed", "error");
   }
+
+  // Fresh packs without a shell still need a server build.
+  if (!html) {
+    setStatus("Building file…");
+    try {
+      const { res, data } = await postJson("/api/build", buildPayload(), 45000);
+      if (res.ok && data?.html) {
+        html = data.html;
+        state.lastHtml = data.html;
+        state.useImportedPreview = false;
+        source = "server";
+      }
+    } catch (err) {
+      console.warn("Server build failed", err);
+    }
+  }
+
+  if (!html) {
+    setStatus("Download failed — could not build the pack", "error");
+    return;
+  }
+
+  try {
+    html = await prepareDownloadTranslations(html);
+  } catch (err) {
+    console.warn("Translation prepare failed", err);
+  }
+
+  triggerHtmlDownload(html, filename);
+  setStatus(
+    source === "local"
+      ? "Downloaded " + filename
+      : "Downloaded " + filename,
+    "ok"
+  );
 }
 
-async function downloadTranslatedPack(html, filename) {
-  let packed = html;
+async function prepareDownloadTranslations(html) {
   const settings = settingsPayload();
   if (
-    settings.translation_enabled &&
-    settings.languages?.length &&
-    window.PackLang?.embedTranslations
+    !settings.translation_enabled ||
+    !settings.languages?.length ||
+    !window.PackLang?.embedTranslations
   ) {
-    try {
-      packed = await PackLang.embedTranslations(
-        html,
-        (message) => setStatus(message),
-        { targets: settings.languages }
-      );
-    } catch (err) {
-      packed = html;
-    }
+    return html;
   }
-  triggerHtmlDownload(packed, filename);
+  setStatus("Preparing language switcher…");
+  // Fast: keep existing maps / seed phrases. Readers translate the rest on language switch.
+  return PackLang.embedTranslations(html, (message) => setStatus(message), {
+    targets: settings.languages,
+    fast: true,
+  });
 }
 
 function triggerHtmlDownload(html, filename) {
@@ -2700,11 +2729,11 @@ function triggerHtmlDownload(html, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Keep the blob URL briefly so the browser can finish the download.
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 els.btnPreview.addEventListener("click", () => {
-  state.useImportedPreview = false;
   schedulePreview(true);
 });
 els.btnDownload.addEventListener("click", () => downloadPack());
