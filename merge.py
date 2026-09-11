@@ -42,6 +42,8 @@ SVG_COLORS = {
     "#64748b": "#857D6B",
 }
 
+SVG_COLOR_RE = re.compile("|".join(re.escape(k) for k in SVG_COLORS), re.I)
+
 PRE_CODE = re.compile(r"(<pre\b[^>]*>\s*<code\b[^>]*>)(.*?)(</code>\s*</pre>)", re.S | re.I)
 CODE_CONTAINER_OPEN = re.compile(
     r"<div\b(?=[^>]*\bclass\s*=\s*[\"'][^\"']*\bcode-container\b)[^>]*>",
@@ -253,9 +255,14 @@ def matching_tag_end(html: str, start: int, tag: str) -> int:
     pos = start + token_len
     depth = 1
     close_len = len(tag) + 3
+    # Lower-case the string once up front instead of on every _find_* call
+    # below — matching_tag_end can otherwise re-scan the whole document
+    # (which may be large: a fully-assembled multi-chapter pack) twice per
+    # nesting level it walks through.
+    lower_html = html.lower()
     while pos < len(html) and depth:
-        next_open = _find_tag_open(html, pos, tag)
-        next_close = _find_close_tag(html, pos, tag)
+        next_open = _find_tag_open(html, pos, tag, lower_html)
+        next_close = _find_close_tag(lower_html, pos, tag)
         if next_close == -1:
             return len(html)
         if next_open != -1 and next_open < next_close:
@@ -275,9 +282,9 @@ def _is_tag_open(html: str, at: int, tag: str) -> bool:
     return nxt in " \t\r\n/>"
 
 
-def _find_tag_open(html: str, pos: int, tag: str) -> int:
+def _find_tag_open(html: str, pos: int, tag: str, lower_html: str | None = None) -> int:
     token = f"<{tag}"
-    lower = html.lower()
+    lower = lower_html if lower_html is not None else html.lower()
     needle = pos
     while True:
         at = lower.find(token, needle)
@@ -288,16 +295,8 @@ def _find_tag_open(html: str, pos: int, tag: str) -> int:
         needle = at + 1
 
 
-def _find_close_tag(html: str, pos: int, tag: str) -> int:
-    return html.lower().find(f"</{tag}>", pos)
-
-
-def _is_div_open(html: str, at: int) -> bool:
-    return _is_tag_open(html, at, "div")
-
-
-def _find_div_open(html: str, pos: int) -> int:
-    return _find_tag_open(html, pos, "div")
+def _find_close_tag(lower_html: str, pos: int, tag: str) -> int:
+    return lower_html.find(f"</{tag}>", pos)
 
 
 def extract_container(html: str) -> str:
@@ -320,9 +319,7 @@ def extract_container(html: str) -> str:
 
 
 def restyle(html: str) -> str:
-    for old, new in SVG_COLORS.items():
-        html = html.replace(old, new)
-        html = html.replace(old.upper(), new)
+    html = SVG_COLOR_RE.sub(lambda m: SVG_COLORS[m.group(0).lower()], html)
     html = html.replace('font-family="sans-serif"', 'font-family="Arial, Helvetica, sans-serif"')
     html = html.replace("stroke:#2563eb", "stroke:#FD0966")
     html = html.replace('stroke="#2563eb"', 'stroke="#FD0966"')
@@ -1773,7 +1770,7 @@ def build_pack(docs: list[Doc], settings: Settings, css: str) -> str:
     if overview:
         overview_section = f"""      <section class="chapter" id="overview">
         {prepared_overview}
-        <p class="site-footer">{settings.footer}</p>
+        <p class="site-footer">{html_lib.escape(settings.footer)}</p>
       </section>"""
     elif chapters:
         overview_section = ""
@@ -1881,7 +1878,7 @@ def apply_theme(css: str, theme: dict | None) -> str:
     extra = []
     width = _safe_theme_value("content_max_width", str(theme.get("content_max_width") or ""))
     if width:
-    extra.append(f"#edit-root, .content {{ max-width: {width}; width: 100%; }}")
+        extra.append(f"#edit-root, .content {{ max-width: {width}; width: 100%; }}")
     if extra:
         css = css + "\n" + "\n".join(extra)
     return css
@@ -1946,8 +1943,19 @@ def build_from_payload(data: dict, css: str | None = None) -> str:
     return build_pack(docs_from_payload(data), settings_from_payload(data), css)
 
 
+_client_css_cache: dict = {}
+
+
 def load_client_css() -> str:
-    return (ROOT / "css" / "styles.css").read_text(encoding="utf-8")
+    # Every /api/build call used to re-read+decode this file from disk even
+    # though it only changes between deploys. Cache by mtime so local edits
+    # still take effect without a restart.
+    path = ROOT / "css" / "styles.css"
+    mtime = path.stat().st_mtime
+    if _client_css_cache.get("mtime") != mtime:
+        _client_css_cache["text"] = path.read_text(encoding="utf-8")
+        _client_css_cache["mtime"] = mtime
+    return _client_css_cache["text"]
 
 
 def _inline_script(js: str) -> str:

@@ -20,7 +20,9 @@ from word import (
     _core,
     _hidden_run,
     _is_code,
+    _local,
     _rels,
+    _table_html,
 )
 
 SLIDE_SUFFIXES = {".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".ppsm"}
@@ -37,10 +39,6 @@ MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 WEB_IMAGE = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 SKIP_PH = {"sldnum", "dt", "ftr", "hdr"}
 TITLE_PH = {"title", "ctrtitle"}
-
-
-def _local(tag: str) -> str:
-    return tag.split("}", 1)[-1]
 
 
 def is_slides_name(name: str) -> bool:
@@ -611,14 +609,3 @@ def _blocks_to_html(blocks: list[dict]) -> str:
             continue
         i += 1
     return "\n".join(out)
-
-
-def _table_html(rows: list[list[str]]) -> str:
-    if not rows:
-        return ""
-    parts = ["<table>"]
-    for index, row in enumerate(rows):
-        tag = "th" if index == 0 else "td"
-        parts.append("<tr>" + "".join(f"<{tag}>{cell}</{tag}>" for cell in row) + "</tr>")
-    parts.append("</table>")
-    return "\n".join(parts)

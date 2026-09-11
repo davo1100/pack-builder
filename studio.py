@@ -68,7 +68,13 @@ class StudioHandler(SimpleHTTPRequestHandler):
             pass
 
     def end_headers(self) -> None:
-        self.send_header("Cache-Control", "no-store")
+        if is_public_path(urlparse(self.path).path):
+            # Static assets: let the browser revalidate via If-Modified-Since
+            # (send_head() already sets Last-Modified) instead of re-downloading
+            # the full file on every load.
+            self.send_header("Cache-Control", "no-cache")
+        else:
+            self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self) -> None:
@@ -98,6 +104,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
                 return self._send_json({"error": "File not found"}, 404)
             except ValueError as exc:
                 return self._send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                return self._send_json({"error": str(exc)}, 400)
             return self._send_json(payload)
 
         if not is_public_path(path):
@@ -107,13 +115,16 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._send_json({"error": "Invalid Content-Length"}, 400)
         if length > 80_000_000:
             return self._send_json({"error": "Payload too large"}, 413)
         raw = self.rfile.read(length)
         try:
             data = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return self._send_json({"error": "Invalid JSON"}, 400)
 
         if parsed.path == "/api/ingest":

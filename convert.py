@@ -9,6 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from icons import icon_for_title, icon_html, wrap_callout
+from word import IMAGE_MIME
 
 VOID = {
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
@@ -16,7 +17,6 @@ VOID = {
 }
 SKIP_TAGS = {"style", "script"}
 INLINE_TAGS = {"a", "abbr", "b", "br", "code", "em", "i", "img", "span", "strong", "sub", "sup", "time", "u"}
-API_LABELS = ("api", "endpoint", "link", "reference", "request", "method")
 LABEL_NAMES = {
     "api": "API",
     "endpoint": "Endpoint",
@@ -38,14 +38,6 @@ METHOD_BADGE = {
     "PATCH": "badge-patch",
     "DELETE": "badge-put",
     "HEAD": "badge-get",
-}
-IMAGE_MIME = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".webp": "image/webp",
 }
 CHROME_IMG = ("icons/", "contenttypes", "grey_arrow", "bullet_blue", "atlassian", "expand-control")
 
@@ -109,21 +101,6 @@ def is_pack_ready(html: str) -> bool:
     return any(
         marker in html
         for marker in ('class="content-card"', 'class="page-header"', 'class="hero"', "class='content-card'")
-    )
-
-
-def is_confluence(html: str) -> bool:
-    lower = html.lower()
-    return any(
-        token in lower
-        for token in (
-            "wiki-content",
-            "aui-theme-default",
-            "confluencetable",
-            "toc-macro",
-            "confluence-information-macro",
-            "expand-container",
-        )
     )
 
 
@@ -353,14 +330,20 @@ class Converter:
             if norm.endswith("/" + path) or norm.endswith("/" + name) or norm == path:
                 return value
         if self.asset_dir:
+            asset_root = Path(self.asset_dir).resolve()
             candidates = [
-                self.asset_dir / path,
-                self.asset_dir / name,
+                asset_root / path,
+                asset_root / name,
             ]
             for candidate in candidates:
-                if candidate.is_file():
-                    data = candidate.read_bytes()
-                    mime = IMAGE_MIME.get(candidate.suffix.lower(), "application/octet-stream")
+                try:
+                    resolved = candidate.resolve()
+                    resolved.relative_to(asset_root)
+                except (OSError, ValueError):
+                    continue
+                if resolved.is_file():
+                    data = resolved.read_bytes()
+                    mime = IMAGE_MIME.get(resolved.suffix.lower(), "application/octet-stream")
                     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
         return src
 
