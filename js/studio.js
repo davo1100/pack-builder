@@ -982,6 +982,10 @@ function readAsBase64(file) {
 
 const API_TIMEOUT_MS = 25000;
 const BUILD_TIMEOUT_MS = 120000;
+// Converting a large, image-heavy Word/PowerPoint file can legitimately take
+// longer than a quick settings/round-trip call - give it the same headroom
+// as a build instead of the default short timeout.
+const INGEST_TIMEOUT_MS = 120000;
 const HOSTED_TIMEOUT_MESSAGE =
   "The hosted converter timed out. Drop a downloaded pack such as documentation.html to load it in the browser, or run Pack Builder locally.";
 
@@ -1334,7 +1338,7 @@ async function ingestFiles(fileList) {
       return;
     }
     setStatus("Converting pages…");
-    const { res, data } = await postJson("/api/ingest", { files, images });
+    const { res, data } = await postJson("/api/ingest", { files, images }, INGEST_TIMEOUT_MS);
     if (!res.ok) {
       setStatus(data.error || "Could not read files", "error");
       return;

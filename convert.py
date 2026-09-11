@@ -40,6 +40,12 @@ METHOD_BADGE = {
     "HEAD": "badge-get",
 }
 CHROME_IMG = ("icons/", "contenttypes", "grey_arrow", "bullet_blue", "atlassian", "expand-control")
+# Real user-uploaded attachments always live under one of these Confluence
+# path prefixes, regardless of which *.atlassian.net site hosts them. Never
+# treat them as decorative chrome even if the "atlassian" token above matches
+# the domain - that token is meant for Confluence's own UI graphics, not the
+# customer's own content.
+CONTENT_IMG_PATHS = ("/download/attachments/", "/wiki/download/attachments/")
 
 
 def matching_div_end(html: str, start: int) -> int:
@@ -349,6 +355,8 @@ class Converter:
 
     def is_chrome_image(self, src: str, alt: str = "") -> bool:
         haystack = f"{src} {alt}".lower()
+        if any(token in haystack for token in CONTENT_IMG_PATHS):
+            return False
         return any(token in haystack for token in CHROME_IMG)
 
     def numbered(self, text: str, level: int) -> str:

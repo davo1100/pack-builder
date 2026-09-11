@@ -293,7 +293,9 @@ def docx_to_html(data: bytes, filename: str = "document.docx") -> tuple[str, dic
     if "word/document.xml" not in names:
         raise ValueError("That Word file has no document.xml body")
 
-    styles = _styles(archive.read("word/styles.xml") if "word/styles.xml" in names else b"")
+    styles_raw = archive.read("word/styles.xml") if "word/styles.xml" in names else b""
+    styles = _styles(styles_raw)
+    style_num_ids = _style_num_ids(styles_raw)
     numbering = _numbering(archive.read("word/numbering.xml") if "word/numbering.xml" in names else b"")
     rels = _rels(archive.read("word/_rels/document.xml.rels") if "word/_rels/document.xml.rels" in names else b"")
     images = _images(archive, rels)
@@ -302,7 +304,7 @@ def docx_to_html(data: bytes, filename: str = "document.docx") -> tuple[str, dic
     if body is None:
         raise ValueError("That Word file has an empty body")
 
-    blocks = _blocks(_flatten_body(body), styles, numbering, rels, images)
+    blocks = _blocks(_flatten_body(body), styles, numbering, rels, images, style_num_ids)
     title = core.get("title") or _first_heading(blocks) or Path(filename).stem.replace("_", " ")
     html = [
         f"<!DOCTYPE html><html><head><title>{html_lib.escape(title)}</title></head><body>",
@@ -330,6 +332,31 @@ def _styles(raw: bytes) -> dict[str, str]:
         name = _val(style.find(f"{W}name"))
         if style_id:
             found[style_id] = name or style_id
+    return found
+
+
+def _style_num_ids(raw: bytes) -> dict[str, str]:
+    """Map styleId -> numId for styles that carry their own list numbering.
+
+    Word can apply bullet/number formatting either directly on a paragraph
+    (<w:pPr><w:numPr>) or via a named style (e.g. pStyle="ListBullet") whose
+    *style definition* carries the numPr instead. _list_info only sees the
+    paragraph, so this lets it fall back to the style's numbering when the
+    paragraph has none of its own.
+    """
+    found: dict[str, str] = {}
+    if not raw:
+        return found
+    root = ET.fromstring(raw)
+    for style in root.findall(f"{W}style"):
+        style_id = style.get(f"{W}styleId") or style.get("styleId") or ""
+        if not style_id:
+            continue
+        ppr = style.find(f"{W}pPr")
+        numpr = ppr.find(f"{W}numPr") if ppr is not None else None
+        num_id = _val(numpr.find(f"{W}numId")) if numpr is not None else ""
+        if num_id:
+            found[style_id] = num_id
     return found
 
 
@@ -426,14 +453,19 @@ def _heading_level(style: str) -> int:
     return 0
 
 
-def _list_info(p: ET.Element, numbering: dict[str, str]) -> tuple[str, str] | None:
+def _list_info(
+    p: ET.Element, numbering: dict[str, str], style_num_ids: dict[str, str] | None = None
+) -> tuple[str, str] | None:
     ppr = p.find(f"{W}pPr")
     if ppr is None:
         return None
     numpr = ppr.find(f"{W}numPr")
-    if numpr is None:
-        return None
-    num_id = _val(numpr.find(f"{W}numId"))
+    num_id = _val(numpr.find(f"{W}numId")) if numpr is not None else ""
+    if not num_id and style_num_ids:
+        # No direct per-paragraph numbering - fall back to whatever the
+        # paragraph's own style declares (see _style_num_ids).
+        style_id = _val(ppr.find(f"{W}pStyle"))
+        num_id = style_num_ids.get(style_id, "")
     if not num_id or num_id == "0":
         return None
     fmt = numbering.get(num_id, "bullet").lower()
@@ -581,6 +613,7 @@ def _blocks(
     numbering: dict[str, str],
     rels: dict[str, dict[str, str]],
     images: dict[str, str],
+    style_num_ids: dict[str, str] | None = None,
 ) -> list[dict]:
     blocks: list[dict] = []
     for child in children:
@@ -614,7 +647,7 @@ def _blocks(
         if _is_quote(style):
             blocks.append({"kind": "quote", "html": _inline_html(child, rels) or html_lib.escape(text)})
             continue
-        listed = _list_info(child, numbering)
+        listed = _list_info(child, numbering, style_num_ids)
         if listed:
             tag_name, num_id = listed
             blocks.append(

@@ -5,6 +5,7 @@ import base64
 import html as html_lib
 import io
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1203,8 +1204,11 @@ def ingest_upload(
             docs, settings = [ingest_file(name, raw=html, asset_dir=asset_dir, images=images)], None
     # Shrink oversized embedded images once here, whatever the source, rather
     # than paying to re-scan/re-encode them on every subsequent preview/build.
+    # One shared deadline across every doc in this batch, so a many-chapter
+    # pack can't multiply the time budget by its chapter count.
+    deadline = time.monotonic() + COMPRESS_TIME_BUDGET_SECONDS
     for doc in docs:
-        doc.body = compress_embedded_images(doc.body)
+        doc.body = compress_embedded_images(doc.body, deadline)
     return docs, settings
 
 
@@ -1726,12 +1730,25 @@ IMAGE_MAX_DIMENSION = 1800
 # is left alone rather than risk a format-specific lossy default.
 COMPRESSIBLE_IMAGE_MIME = {"image/png": "PNG", "image/jpeg": "JPEG"}
 _MIN_COMPRESSIBLE_BYTES = 40_000
+# A deck/doc with unusually many large images could otherwise keep an ingest
+# request busy indefinitely. Once this much time has gone into compression,
+# leave any remaining images embedded as-is rather than risk a request that
+# never returns - a bigger download beats one that times out.
+COMPRESS_TIME_BUDGET_SECONDS = 8.0
 
 
-def compress_embedded_images(html: str) -> str:
+def compress_embedded_images(html: str, deadline: float | None = None) -> str:
     if "base64," not in html:
         return html
-    return DATA_URI_RE.sub(lambda m: _compress_data_uri(m.group(0)), html)
+    if deadline is None:
+        deadline = time.monotonic() + COMPRESS_TIME_BUDGET_SECONDS
+
+    def repl(m: re.Match) -> str:
+        if time.monotonic() > deadline:
+            return m.group(0)
+        return _compress_data_uri(m.group(0))
+
+    return DATA_URI_RE.sub(repl, html)
 
 
 def _compress_data_uri(data_uri: str) -> str:
@@ -1768,9 +1785,15 @@ def _compress_data_uri(data_uri: str) -> str:
             if fmt == "JPEG" and img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             out = io.BytesIO()
-            save_kwargs = {"optimize": True}
             if fmt == "JPEG":
-                save_kwargs["quality"] = 90
+                save_kwargs = {"optimize": True, "quality": 90}
+            else:
+                # PNG's optimize=True tries multiple filter/compression
+                # strategies to find the smallest output - for a big batch of
+                # photo-like screenshots (a media-heavy PowerPoint deck, say)
+                # that can cost seconds per image for a few percent of extra
+                # savings. The default compressor is a fraction of the time.
+                save_kwargs = {"optimize": False}
             img.save(out, format=fmt, **save_kwargs)
     except Exception:
         return data_uri
