@@ -431,6 +431,7 @@ body:not(:has(:target)) .sidebar .nav-chapter[href="#overview"] {
 .content {
   flex: 1;
   min-width: 0;
+  width: 100%;
   padding: 36px 40px 80px;
   max-width: var(--content-max-width, 1100px);
 }
@@ -1761,6 +1762,52 @@ h3 .pack-icon,
   background: var(--j-ground);
 }
 
+.pack-journey.pack-journey--ab,
+.pack-journey:has(> .pack-journey-sheet > .ab) {
+  background: transparent;
+  border-radius: 0;
+}
+
+.pack-journey.pack-journey--ab > .pack-journey-sheet,
+.pack-journey:has(> .pack-journey-sheet > .ab) > .pack-journey-sheet {
+  padding: 0;
+  background: transparent;
+  font-family: "PP Mori", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Kill pack .card / .tag chrome on legacy .ab sheets (do NOT zero * padding — :has() beats .card). */
+.pack-journey.pack-journey--ab .ab .card,
+.pack-journey:has(> .pack-journey-sheet > .ab) .ab .card {
+  border: 0;
+  justify-content: flex-start;
+  transition: none;
+  transform: none;
+}
+
+.pack-journey.pack-journey--ab .ab .card:hover,
+.pack-journey:has(> .pack-journey-sheet > .ab) .ab .card:hover {
+  transform: none;
+  border-color: transparent;
+  box-shadow: 0 16px 34px -14px rgba(48, 20, 110, 0.18), 0 2px 5px rgba(48, 20, 110, 0.05);
+}
+
+.pack-journey.pack-journey--ab .ab .card h3,
+.pack-journey:has(> .pack-journey-sheet > .ab) .ab .card h3,
+.pack-journey.pack-journey--ab .ab .card p,
+.pack-journey:has(> .pack-journey-sheet > .ab) .ab .card p {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.pack-journey.pack-journey--ab .ab .tag,
+.pack-journey:has(> .pack-journey-sheet > .ab) .ab .tag {
+  font-family: inherit;
+  border-radius: 999px;
+}
+
 .pack-journey-sheet {
   position: relative;
   width: var(--sheet-w);
@@ -2294,6 +2341,7 @@ h3 .pack-icon,
 
 .pack-tab-panel:has(> .pack-journey:only-child) {
   padding: 0;
+  overflow: hidden;
 }
 
 .pack-tab-panel > .pack-journey:first-child {
@@ -2303,6 +2351,27 @@ h3 .pack-icon,
 .pack-tab-panel > .pack-journey:only-child {
   margin: 0;
   border-radius: 0 0 12px 12px;
+}
+
+.pack-tab-panel > .pack-journey.pack-journey--ab:only-child,
+.pack-tab-panel > .pack-journey:has(> .pack-journey-sheet > .ab):only-child {
+  background: #edebfb;
+}
+
+/* Active tab fills the same lavender as an .ab journey so the chrome feels flush. */
+.pack-tabs:has(.pack-tab-radio[value="0"]:checked):has(.pack-tab-panel[data-tab="0"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(1):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="1"]:checked):has(.pack-tab-panel[data-tab="1"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(2):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="2"]:checked):has(.pack-tab-panel[data-tab="2"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(3):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="3"]:checked):has(.pack-tab-panel[data-tab="3"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(4):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="4"]:checked):has(.pack-tab-panel[data-tab="4"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(5):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="5"]:checked):has(.pack-tab-panel[data-tab="5"] > .pack-journey.pack-journey--ab:only-child) .pack-tab:nth-child(6):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="0"]:checked):has(.pack-tab-panel[data-tab="0"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(1):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="1"]:checked):has(.pack-tab-panel[data-tab="1"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(2):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="2"]:checked):has(.pack-tab-panel[data-tab="2"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(3):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="3"]:checked):has(.pack-tab-panel[data-tab="3"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(4):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="4"]:checked):has(.pack-tab-panel[data-tab="4"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(5):has(:checked),
+.pack-tabs:has(.pack-tab-radio[value="5"]:checked):has(.pack-tab-panel[data-tab="5"] > .pack-journey:has(> .pack-journey-sheet > .ab):only-child) .pack-tab:nth-child(6):has(:checked) {
+  background: #edebfb;
 }
 
 @keyframes pack-j-dash {

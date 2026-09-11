@@ -1646,9 +1646,61 @@ def prepare_body(body: str, doc: Doc, mapping: dict[str, str], allowed: set[str]
     html = wrap_code_blocks(html)
     html = flatten_nested_code_folds(html)
     html = highlight_code_blocks(html)
+    html = repair_journey_runtime_styles(html)
     html = prefix_ids(html, doc.id)
     if doc.id == "overview":
         html = html.replace('id="overview-overview"', 'id="overview-intro"')
+    return html
+
+
+def repair_journey_runtime_styles(html: str) -> str:
+    """Strip PackJourney fit() inline sizing that collapses sheets (height:0) in downloads."""
+    if not html or "pack-journey" not in html:
+        return html or ""
+
+    drop_host = {
+        "height",
+        "overflow",
+        "margin-left",
+        "margin-right",
+        "width",
+        "max-width",
+        "box-sizing",
+        "--journey-scale",
+    }
+    drop_sheet = {"transform", "transform-origin", "margin-bottom", "height", "max-width"}
+
+    def scrub(style: str, drop: set[str]) -> str:
+        parts = []
+        for part in style.split(";"):
+            decl = part.strip()
+            if not decl:
+                continue
+            prop = decl.split(":", 1)[0].strip().lower()
+            if prop in drop:
+                continue
+            parts.append(decl)
+        return "; ".join(parts)
+
+    def rewrite(match: re.Match, drop: set[str]) -> str:
+        before, quote, style, after = match.group(1), match.group(2), match.group(3), match.group(4)
+        cleaned = scrub(style, drop)
+        if not cleaned:
+            return before + after
+        return f"{before} style={quote}{cleaned}{quote}{after}"
+
+    html = re.sub(
+        r'(<div\b(?![^>]*\bpack-journey-sheet\b)[^>]*\bpack-journey\b[^>]*?)\sstyle=(["\'])(.*?)\2([^>]*>)',
+        lambda m: rewrite(m, drop_host),
+        html,
+        flags=re.I | re.S,
+    )
+    html = re.sub(
+        r'(<div\b[^>]*\bpack-journey-sheet\b[^>]*?)\sstyle=(["\'])(.*?)\2([^>]*>)',
+        lambda m: rewrite(m, drop_sheet),
+        html,
+        flags=re.I | re.S,
+    )
     return html
 
 
@@ -1829,7 +1881,7 @@ def apply_theme(css: str, theme: dict | None) -> str:
     extra = []
     width = _safe_theme_value("content_max_width", str(theme.get("content_max_width") or ""))
     if width:
-        extra.append(f".content {{ max-width: {width}; }}")
+    extra.append(f"#edit-root, .content {{ max-width: {width}; width: 100%; }}")
     if extra:
         css = css + "\n" + "\n".join(extra)
     return css

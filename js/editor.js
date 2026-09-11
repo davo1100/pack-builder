@@ -91,7 +91,7 @@ const PackEditor = {
   <style id="theme-override">${themeCss || ""}</style>
   <style>
     body { background: var(--cream, #F2EEE2); }
-    #edit-root { padding: 28px 32px 80px; max-width: 1600px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+    #edit-root { padding: 28px 32px 80px; max-width: var(--content-max-width, 1100px); width: 100%; margin: 0 auto; box-sizing: border-box; }
     #edit-root .pack-journey { position: relative; z-index: 1; }
     #edit-root:focus { outline: none; }
     [data-layout-block].is-selected {
@@ -272,6 +272,20 @@ const PackEditor = {
       frame.removeAttribute("srcdoc");
       frame.removeAttribute("data-mounted");
       frame.style.removeProperty("height");
+    });
+    // Drop PackJourney runtime sizing so downloads don't ship height:0 empty frames.
+    clone.querySelectorAll(".pack-journey").forEach((journey) => {
+      ["height", "overflow", "margin-left", "margin-right", "width", "max-width", "box-sizing"].forEach((prop) => {
+        journey.style.removeProperty(prop);
+      });
+      journey.style.removeProperty("--journey-scale");
+      if (!(journey.getAttribute("style") || "").trim()) journey.removeAttribute("style");
+    });
+    clone.querySelectorAll(".pack-journey-sheet").forEach((sheet) => {
+      ["transform", "transform-origin", "margin-bottom", "height", "max-width"].forEach((prop) => {
+        sheet.style.removeProperty(prop);
+      });
+      if (!(sheet.getAttribute("style") || "").trim()) sheet.removeAttribute("style");
     });
     return clone.innerHTML;
   },
@@ -547,14 +561,52 @@ const PackEditor = {
       .map((node) => String(node.textContent || ""))
       .join("\n");
     if (!raw.trim()) return "";
-    return raw
-      .replace(/@font-face\s*\{[^}]*\}/gi, "")
+    return this._scopeJourneyCss(raw);
+  },
+
+  _scopeJourneyCss(raw) {
+    let css = String(raw || "");
+    if (!css.trim()) return "";
+    // Keep embedded journey fonts — they are what make the sheet match the source file.
+    css = css
       .replace(/html\s*,\s*body\s*\{[^}]*\}/gi, "")
-      .replace(/(^|})\s*body\s*\{[^}]*\}/gi, "$1")
       .replace(/html\s*\{[^}]*\}/gi, "")
+      .replace(/a\s*\{[^}]*\}\s*a:hover\s*\{[^}]*\}/gi, "")
       .replace(/\.fit(?:-inner)?[^{]*\{[^}]*\}/gi, "")
       .replace(/\.jsheet\b/g, ".pack-journey-sheet")
       .trim();
+    if (!css) return "";
+    const scope = ".pack-journey";
+    // Move body font rules onto the journey host instead of dropping them.
+    css = css.replace(/(^|})\s*body\s*\{([^}]*)\}/gi, (match, brace, body) => {
+      const keep = String(body || "")
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => /^(font-family|font-size|font-weight|-webkit-font-smoothing)\s*:/i.test(part));
+      if (!keep.length) return brace;
+      return `${brace}\n${scope} {\n  ${keep.join("; ")};\n}`;
+    });
+    // Rewrite :root custom properties onto the journey host.
+    css = css.replace(/(^|})\s*:root\s*\{/gi, `$1 ${scope} {`);
+    // Prefix ordinary selectors so journey rules cannot restyle the pack (.card, .tag, etc.).
+    // Keep * resets, but scope them so they only hit the journey (margin/padding zero is required).
+    css = css.replace(/(^|})\s*([^{}@]+)\s*\{/g, (match, brace, selectors) => {
+      const list = String(selectors || "")
+        .split(",")
+        .map((sel) => sel.trim())
+        .filter(Boolean)
+        .map((sel) => {
+          if (/^(from|to|0%|100%|\d+%)$/i.test(sel)) return sel;
+          if (sel.startsWith(scope)) return sel;
+          if (sel.startsWith(":root")) return scope;
+          if (sel === "*") return `${scope} *, ${scope} *::before, ${scope} *::after`;
+          if (sel.startsWith("*")) return `${scope} ${sel}`;
+          return `${scope} ${sel}`;
+        });
+      if (!list.length) return match;
+      return `${brace}\n${list.join(",\n")} {`;
+    });
+    return css.trim();
   },
 
   _injectJourneyCss(parsed, wrap) {
@@ -572,21 +624,19 @@ const PackEditor = {
     if (!ab) return "";
     ab.querySelectorAll("script").forEach((node) => node.remove());
     const host = parsed.createElement("div");
-    host.className = "pack-journey";
+    host.className = "pack-journey pack-journey--ab";
     const wrap = parsed.createElement("div");
     wrap.className = "pack-journey-sheet";
-    wrap.setAttribute("style", "padding:0;background:transparent");
+    wrap.setAttribute("style", "padding:0;background:transparent;width:1600px");
     this._injectJourneyCss(parsed, wrap);
     // Fallback for older .ab sheets when style filter differs.
     if (!wrap.querySelector("style[data-journey-css]")) {
-      const css = [...parsed.querySelectorAll("style")]
-        .map((node) => String(node.textContent || ""))
-        .filter((chunk) => /\.ab\b|\.pill\b|\.ribbon\b|\.card\b|--violet/.test(chunk))
-        .join("\n")
-        .replace(/@font-face\s*\{[^}]*\}/gi, "")
-        .replace(/html\s*,\s*body\s*\{[^}]*\}/gi, "")
-        .replace(/(^|})\s*body\s*\{[^}]*\}/gi, "$1")
-        .replace(/\.fit(?:-inner)?[^{]*\{[^}]*\}/gi, "");
+      const css = this._scopeJourneyCss(
+        [...parsed.querySelectorAll("style")]
+          .map((node) => String(node.textContent || ""))
+          .filter((chunk) => /\.ab\b|\.pill\b|\.ribbon\b|\.card\b|--violet/.test(chunk))
+          .join("\n")
+      );
       if (css.trim()) {
         const style = parsed.createElement("style");
         style.setAttribute("data-journey-css", "1");
@@ -597,6 +647,22 @@ const PackEditor = {
     wrap.appendChild(ab);
     host.appendChild(wrap);
     return host.outerHTML;
+  },
+
+  _repairJourneyCss(journey) {
+    if (!journey?.querySelectorAll) return;
+    journey.querySelectorAll("style[data-journey-css]").forEach((style) => {
+      const raw = String(style.textContent || "");
+      if (!raw.trim()) return;
+      const alreadyScoped = /\.pack-journey\s+\.ab\b|\.pack-journey\s+\.card\b|\.pack-journey\s+\.pill\b/.test(raw);
+      const hasFont = /@font-face/i.test(raw) || /font-family\s*:\s*['"]?PP Mori/i.test(raw);
+      if (alreadyScoped && hasFont) return;
+      if (!/\.ab\b|\.card\b|\.pill\b|\.jsheet\b|\.j-card\b|@font-face/i.test(raw)) return;
+      // Already-scoped CSS without fonts cannot recover @font-face — leave it.
+      if (alreadyScoped) return;
+      const scoped = this._scopeJourneyCss(raw);
+      if (scoped && scoped !== raw) style.textContent = scoped;
+    });
   },
 
   _journeyIcon(name) {
@@ -1617,10 +1683,16 @@ const PackEditor = {
       this._stripTabPlaceholderAroundObjects(el);
     });
     root.querySelectorAll(".pack-journey").forEach((journey) => {
+      if (journey.querySelector(".ab")) journey.classList.add("pack-journey--ab");
+      this._repairJourneyCss(journey);
       if (typeof PackJourney !== "undefined") PackJourney.ensureSheet(journey);
-      journey.querySelectorAll(".j-pill, .j-ribbon, .j-ghost, .j-tile, .j-logo, .j-feat .ft, .j-tag .i, .j-clr .cb, .j-panel .b2, svg, img").forEach((el) => {
-        el.setAttribute("contenteditable", "false");
-      });
+      journey
+        .querySelectorAll(
+          ".j-pill, .j-ribbon, .j-ghost, .j-tile, .j-logo, .j-feat .ft, .j-tag .i, .j-clr .cb, .j-panel .b2, .pill, .tile, .bignum, svg, img"
+        )
+        .forEach((el) => {
+          el.setAttribute("contenteditable", "false");
+        });
     });
     if (typeof PackJourney !== "undefined") PackJourney.bind(root, { frame: this.iframe });
     root.querySelectorAll("pre, .code-container, .code-fold, table, .diagram-container, .pack-flow, .pack-html").forEach((el) => {

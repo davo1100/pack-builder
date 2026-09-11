@@ -130,7 +130,8 @@ function themeOverrideCss() {
     --color-bg: var(--cream);
     --color-link: var(--eden-magenta);
   }
-  .content { max-width: ${t.content_max_width}; }`;
+  #edit-root,
+  .content { max-width: var(--content-max-width, ${t.content_max_width}); width: 100%; }`;
 }
 
 function toColorInput(value) {
@@ -943,6 +944,7 @@ function readAsBase64(file) {
 }
 
 const API_TIMEOUT_MS = 25000;
+const BUILD_TIMEOUT_MS = 120000;
 const HOSTED_TIMEOUT_MESSAGE =
   "The hosted converter timed out. Drop a downloaded pack such as documentation.html to load it in the browser, or run Pack Builder locally.";
 
@@ -2279,7 +2281,7 @@ async function refreshPreview() {
   }
   setStatus("Building preview…");
   try {
-    const { res, data } = await postJson("/api/build", buildPayload());
+    const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
     if (!res.ok) {
       if (state.lastHtml) {
         showPreviewHtml(state.lastHtml);
@@ -2452,7 +2454,7 @@ async function downloadPack() {
   setStatus("Creating file…");
   const filename = settingsPayload().output_filename;
   try {
-    const { res, data } = await postJson("/api/build", buildPayload());
+    const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
     if (!res.ok) {
       if (state.lastHtml) {
         await downloadTranslatedPack(state.lastHtml, filename);

@@ -53,11 +53,21 @@
     const sheet = ensureSheet(host);
     if (!sheet) return;
 
+    // Inactive tab panels are display:none — measuring them yields 0 and used to
+    // bake height:0 into the saved HTML, so downloads showed an empty frame.
+    const hostWidth = host.clientWidth || host.getBoundingClientRect().width || 0;
+    if (hostWidth < 2) {
+      if (host.style.height === "0px") host.style.height = "auto";
+      return;
+    }
+
     alignToPage(host);
     host.style.height = "auto";
 
     const width = measureWidth(host);
-    const scale = Math.min(1, width / DESIGN_W);
+    if (width < 2) return;
+
+    const scale = Math.min(1, Math.max(0.05, width / DESIGN_W));
     sheet.style.width = DESIGN_W + "px";
     sheet.style.maxWidth = "none";
     sheet.style.height = "auto";
@@ -65,8 +75,9 @@
     sheet.style.transformOrigin = "top left";
     sheet.style.transform = "scale(" + scale + ")";
 
-    // Natural height + overflow:hidden clips bubbles; collapse leftover layout space.
-    const natural = sheet.scrollHeight || sheet.offsetHeight || 0;
+    const natural = Math.max(sheet.scrollHeight || 0, sheet.offsetHeight || 0);
+    if (natural < 1) return;
+
     sheet.style.marginBottom = Math.ceil(natural * scale - natural) + "px";
     host.style.height = Math.ceil(natural * scale) + "px";
     host.style.overflow = "hidden";
@@ -79,17 +90,35 @@
     rootEl.querySelectorAll(".pack-journey").forEach(fitOne);
   }
 
+  function scheduleFit(rootEl) {
+    fit(rootEl);
+    const win = rootEl.defaultView || (rootEl.ownerDocument && rootEl.ownerDocument.defaultView) || root;
+    if (win && typeof win.requestAnimationFrame === "function") {
+      win.requestAnimationFrame(() => fit(rootEl));
+    }
+  }
+
   function bind(scope, options) {
     const rootEl = scope && scope.querySelectorAll ? scope : root.document;
     if (!rootEl) return;
-    fit(rootEl);
+    scheduleFit(rootEl);
     const win = rootEl.defaultView || (rootEl.ownerDocument && rootEl.ownerDocument.defaultView) || root;
+
+    if (!rootEl.__packJourneyTabs) {
+      rootEl.__packJourneyTabs = true;
+      rootEl.addEventListener("change", (event) => {
+        if (event.target && event.target.matches && event.target.matches(".pack-tab-radio")) {
+          scheduleFit(rootEl);
+        }
+      });
+    }
+
     if (typeof ResizeObserver === "undefined") {
-      win.addEventListener("resize", () => fit(rootEl));
+      win.addEventListener("resize", () => scheduleFit(rootEl));
       return;
     }
     if (!rootEl.__packJourneyRO) {
-      rootEl.__packJourneyRO = new ResizeObserver(() => fit(rootEl));
+      rootEl.__packJourneyRO = new ResizeObserver(() => scheduleFit(rootEl));
       rootEl.querySelectorAll(".pack-journey").forEach((host) => rootEl.__packJourneyRO.observe(host));
       if (rootEl.documentElement) rootEl.__packJourneyRO.observe(rootEl.documentElement);
       else if (rootEl.ownerDocument && rootEl.ownerDocument.documentElement) {
@@ -104,7 +133,7 @@
     }
     const frame = options && options.frame;
     if (frame && !frame.__packJourneyRO) {
-      frame.__packJourneyRO = new ResizeObserver(() => fit(rootEl));
+      frame.__packJourneyRO = new ResizeObserver(() => scheduleFit(rootEl));
       frame.__packJourneyRO.observe(frame);
     }
     // Also watch the parent column so width changes reflow the scale.

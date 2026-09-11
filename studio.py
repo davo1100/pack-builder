@@ -58,7 +58,14 @@ class StudioHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def log_message(self, format: str, *args) -> None:
-        print(f"[studio] {self.address_string()} {format % args}")
+        print(f"[studio] {self.address_string()} {format % args}", flush=True)
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Client closed the tab / timed out mid-response.
+            pass
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
@@ -189,11 +196,29 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def _send_json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Browser aborted (often the 25s client timeout on a large /api/build).
+            return
+
+
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """Don't dump full tracebacks for routine client disconnects."""
+
+    def handle_error(self, request, client_address) -> None:
+        import sys
+
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            host = client_address[0] if client_address else "?"
+            print(f"[studio] {host} disconnected before the response finished", flush=True)
+            return
+        super().handle_error(request, client_address)
 
 
 def _list_local_files() -> dict:
@@ -262,7 +287,7 @@ def main() -> None:
         (ROOT / "inbox").mkdir(exist_ok=True)
     url = public_url(host, port)
     try:
-        server = ThreadingHTTPServer((host, port), StudioHandler)
+        server = QuietThreadingHTTPServer((host, port), StudioHandler)
     except OSError as exc:
         print(f"Could not start on {url}", flush=True)
         print(str(exc), flush=True)
