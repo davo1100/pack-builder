@@ -131,7 +131,36 @@ function themeOverrideCss() {
     --color-link: var(--eden-magenta);
   }
   #edit-root,
-  .content { max-width: var(--content-max-width, ${t.content_max_width}); width: 100%; }`;
+  main.content,
+  .content {
+    max-width: ${t.content_max_width};
+    width: 100%;
+  }`;
+}
+
+/** Overlay current Design settings onto a built pack (imported previews bake old max-width). */
+function withLiveTheme(html) {
+  const text = String(html || "");
+  if (!text || !/<html[\s>]/i.test(text)) return text;
+  const css = themeOverrideCss();
+  const tag = `<style id="pack-builder-theme-live">${css}</style>`;
+  if (/id=["']pack-builder-theme-live["']/.test(text)) {
+    return text.replace(/<style\b[^>]*\bid=["']pack-builder-theme-live["'][^>]*>[\s\S]*?<\/style>/i, tag);
+  }
+  if (/<\/head>/i.test(text)) return text.replace(/<\/head>/i, `${tag}</head>`);
+  return tag + text;
+}
+
+function applyThemeToPreviewFrame() {
+  const doc = els.preview?.contentDocument;
+  if (!doc?.head) return;
+  let tag = doc.getElementById("pack-builder-theme-live");
+  if (!tag) {
+    tag = doc.createElement("style");
+    tag.id = "pack-builder-theme-live";
+    doc.head.appendChild(tag);
+  }
+  tag.textContent = themeOverrideCss();
 }
 
 function toColorInput(value) {
@@ -1442,10 +1471,12 @@ syncFaviconPreview();
   const el = document.getElementById(id);
   el.addEventListener("input", () => {
     PackEditor.applyTheme(themeOverrideCss());
+    applyThemeToPreviewFrame();
     schedulePreview();
   });
   el.addEventListener("change", () => {
     PackEditor.applyTheme(themeOverrideCss());
+    applyThemeToPreviewFrame();
     schedulePreview();
   });
 });
@@ -2306,7 +2337,8 @@ async function refreshPreview() {
 
 function showPreviewHtml(html) {
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
-  state.previewUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+  const themed = withLiveTheme(html);
+  state.previewUrl = URL.createObjectURL(new Blob([themed], { type: "text/html;charset=utf-8" }));
   els.preview.removeAttribute("srcdoc");
   const anchor = packAnchorFor(docById(state.selected));
   els.preview.src = `${state.previewUrl}#${anchor}`;
@@ -2457,8 +2489,8 @@ async function downloadPack() {
     const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
     if (!res.ok) {
       if (state.lastHtml) {
-        await downloadTranslatedPack(state.lastHtml, filename);
-        setStatus("Downloaded the imported pack; rebuild timed out", "error");
+        await downloadTranslatedPack(withLiveTheme(state.lastHtml), filename);
+        setStatus("Downloaded the imported pack with your Design settings; rebuild timed out", "error");
         return;
       }
       setStatus(data.error || "Download failed", "error");
@@ -2468,8 +2500,8 @@ async function downloadPack() {
     setStatus("Downloaded " + (data.filename || filename), "ok");
   } catch (err) {
     if (state.lastHtml) {
-      await downloadTranslatedPack(state.lastHtml, filename);
-      setStatus("Downloaded the imported pack; rebuild timed out", "error");
+      await downloadTranslatedPack(withLiveTheme(state.lastHtml), filename);
+      setStatus("Downloaded the imported pack with your Design settings; rebuild timed out", "error");
       return;
     }
     setStatus(err.message || "Download failed", "error");
