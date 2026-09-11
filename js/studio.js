@@ -416,8 +416,12 @@ function mergeIncoming(docs, options = {}) {
   let lastId = null;
   for (const incoming of docs) {
     const existing = state.docs.find((d) => d.filename === incoming.filename);
+    const incomingPackId =
+      incoming.packId ||
+      (incoming.id && /^(overview|flow-\d{1,2})$/i.test(String(incoming.id)) ? String(incoming.id) : "");
     const next = {
       id: existing?.id || uid(),
+      packId: incomingPackId || existing?.packId || "",
       filename: incoming.filename,
       title: decodeEntities(incoming.title || existing?.title || incoming.filename),
       role: incoming.role,
@@ -427,7 +431,11 @@ function mergeIncoming(docs, options = {}) {
       body: String(incoming.body || "").replaceAll("&amp;amp;", "&amp;"),
     };
     if (existing) {
-      Object.assign(existing, next, { id: existing.id, body: incoming.body || existing.body });
+      Object.assign(existing, next, {
+        id: existing.id,
+        packId: next.packId || existing.packId || "",
+        body: incoming.body || existing.body,
+      });
       lastId = existing.id;
     } else {
       state.docs.push(next);
@@ -1258,6 +1266,7 @@ function splitBuiltPackHtml(html, filename) {
       draft: /badge-draft|status-draft|>Draft</i.test(inner),
       num,
       body: inner,
+      packId: sectionId || (role === "overview" ? "overview" : num ? `flow-${num}` : ""),
       id: sectionId || "",
     });
     pos = end;
@@ -1319,7 +1328,7 @@ async function ingestFiles(fileList) {
       if (importedPackHtml) {
         state.lastHtml = importedPackHtml;
         state.useImportedPreview = true;
-        showPreviewHtml(importedPackHtml);
+        showPreviewHtml(assemblePreviewHtml(importedPackHtml) || importedPackHtml);
       }
       setStatus(`${state.docs.length} page${state.docs.length === 1 ? "" : "s"} loaded`, "ok");
       return;
@@ -2298,24 +2307,165 @@ function emptyPreview(message) {
   return `<!DOCTYPE html><html><body style="font-family:Arial;padding:48px;color:#857D6B;background:#F2EEE2">${escapeHtml(message)}</body></html>`;
 }
 
+function sectionIdForDoc(doc) {
+  if (!doc) return "";
+  if (doc.packId) return doc.packId;
+  if (doc.role === "overview") return "overview";
+  const num = chapterNum(doc.num);
+  return num ? `flow-${num}` : "";
+}
+
+function findChapterSection(html, sectionId) {
+  const text = String(html || "");
+  const want = String(sectionId || "");
+  if (!text || !want) return null;
+  const lower = text.toLowerCase();
+  const needle = `id="${want.toLowerCase()}"`;
+  let pos = 0;
+  while (true) {
+    const idAt = lower.indexOf(needle, pos);
+    if (idAt === -1) return null;
+    const start = text.lastIndexOf("<section", idAt);
+    if (start === -1 || start < pos) {
+      pos = idAt + 1;
+      continue;
+    }
+    const gt = text.indexOf(">", start);
+    if (gt === -1 || gt < idAt) {
+      pos = idAt + 1;
+      continue;
+    }
+    const openTag = text.slice(start, gt + 1);
+    if (!/\bclass="[^"]*\bchapter\b/i.test(openTag) || attrFromTag(openTag, "id") !== want) {
+      pos = idAt + 1;
+      continue;
+    }
+    const end = matchingTagEnd(text, start, "section");
+    return { start, gt, end };
+  }
+}
+
+function replaceChapterSectionInner(html, sectionId, inner) {
+  const found = findChapterSection(html, sectionId);
+  if (!found) return html;
+  return html.slice(0, found.gt + 1) + "\n" + String(inner || "") + "\n" + html.slice(found.end - "</section>".length);
+}
+
+function removeChapterSection(html, sectionId) {
+  const found = findChapterSection(html, sectionId);
+  if (!found) return html;
+  return html.slice(0, found.start) + html.slice(found.end);
+}
+
+function patchPackChrome(html) {
+  let out = String(html || "");
+  if (!out) return out;
+  const s = settingsPayload();
+  out = out.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(s.page_title)}</title>`);
+  out = out.replace(
+    /(<span class="header-doc">)[\s\S]*?(<\/span>)/i,
+    `$1${escapeHtml(s.header_doc)}$2`
+  );
+  out = out.replace(
+    /(<a class="brand-lockup"[^>]*>\s*<img\b[^>]*?\bsrc=")[^"]*(")/i,
+    `$1${escapeAttr(s.logo_url)}$2`
+  );
+  out = out.replace(
+    /(<a class="brand-lockup"[^>]*>\s*<img\b[^>]*?\balt=")[^"]*(")/i,
+    `$1${escapeAttr(s.logo_alt)}$2`
+  );
+  if (s.confidential) {
+    if (!/class="confidential"/.test(out)) {
+      out = out.replace(
+        /(<div class="header-right">)/i,
+        '$1\n        <span class="confidential">Confidential</span>'
+      );
+    }
+  } else {
+    out = out.replace(/\s*<span class="confidential">[\s\S]*?<\/span>/gi, "");
+  }
+  out = out.replace(
+    /(<p class="site-footer">)[\s\S]*?(<\/p>)/i,
+    `$1${escapeHtml(s.footer)}$2`
+  );
+  out = out.replace(/<style\b[^>]*\bid=["']pack-builder-theme-live["'][^>]*>[\s\S]*?<\/style>/gi, "");
+  return out;
+}
+
+function canAssemblePreview(html) {
+  return isBuiltPackHtml(html) && /<section\b[^>]*\bchapter\b/i.test(html);
+}
+
+/** Splice current page bodies into the last built/imported pack shell (avoids slow /api/build). */
+function assemblePreviewHtml(shellHtml) {
+  flushEditor();
+  let html = patchPackChrome(shellHtml);
+  if (!html) return "";
+  const keep = new Set();
+  for (const doc of state.docs) {
+    const sid = sectionIdForDoc(doc);
+    if (!sid) continue;
+    if (!doc.include) {
+      html = removeChapterSection(html, sid);
+      continue;
+    }
+    keep.add(sid);
+    html = replaceChapterSectionInner(html, sid, doc.body || "");
+  }
+  // Drop leftover shell chapters that are no longer in the file list.
+  const lower = html.toLowerCase();
+  let pos = 0;
+  const removals = [];
+  while (true) {
+    let start = lower.indexOf("<section", pos);
+    while (start !== -1) {
+      const next = html[start + 8] || "";
+      if (" \t\r\n/>".includes(next)) break;
+      start = lower.indexOf("<section", start + 1);
+    }
+    if (start === -1) break;
+    const gt = html.indexOf(">", start);
+    if (gt === -1) break;
+    const openTag = html.slice(start, gt + 1);
+    const end = matchingTagEnd(html, start, "section");
+    if (/\bclass="[^"]*\bchapter\b/i.test(openTag)) {
+      const sid = attrFromTag(openTag, "id");
+      if (sid && !keep.has(sid)) removals.push([start, end]);
+    }
+    pos = end;
+  }
+  for (let i = removals.length - 1; i >= 0; i -= 1) {
+    const [a, b] = removals[i];
+    html = html.slice(0, a) + html.slice(b);
+  }
+  return html;
+}
+
 async function refreshPreview() {
   if (!state.docs.some((d) => d.include)) return;
-  if (state.useImportedPreview && state.lastHtml) {
-    const staleLangUi =
-      /class=["']pack-lang-select["']/.test(state.lastHtml) ||
-      (/class=["']pack-lang["']/.test(state.lastHtml) && !/class=["']pack-lang-btn["']/.test(state.lastHtml));
-    if (!staleLangUi) {
-      showPreviewHtml(state.lastHtml);
-      return;
+
+  // Large imported packs time out on /api/build — assemble from the shell instead.
+  if (canAssemblePreview(state.lastHtml)) {
+    try {
+      const assembled = assemblePreviewHtml(state.lastHtml);
+      if (assembled) {
+        showPreviewHtml(assembled);
+        setStatus("Preview up to date", "ok");
+        return;
+      }
+    } catch (err) {
+      console.warn("Client preview assemble failed", err);
     }
-    state.useImportedPreview = false;
   }
+
   setStatus("Building preview…");
   try {
     const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
     if (!res.ok) {
       if (state.lastHtml) {
-        showPreviewHtml(state.lastHtml);
+        showPreviewHtml(
+          canAssemblePreview(state.lastHtml) ? assemblePreviewHtml(state.lastHtml) : state.lastHtml
+        );
         setStatus(data.error || "Preview is showing the imported pack; rebuild timed out", "error");
         return;
       }
@@ -2323,12 +2473,15 @@ async function refreshPreview() {
       return;
     }
     state.lastHtml = data.html;
+    state.useImportedPreview = false;
     showPreviewHtml(data.html);
     setStatus("Preview up to date", "ok");
   } catch (err) {
     if (state.lastHtml) {
-      showPreviewHtml(state.lastHtml);
-      setStatus("Preview is showing the imported pack; rebuild timed out", "error");
+      showPreviewHtml(
+        canAssemblePreview(state.lastHtml) ? assemblePreviewHtml(state.lastHtml) : state.lastHtml
+      );
+      setStatus("Preview is showing a local assemble; server rebuild timed out", "error");
       return;
     }
     setStatus(err.message || "Build failed", "error");
@@ -2485,23 +2638,32 @@ async function downloadPack() {
   flushEditor();
   setStatus("Creating file…");
   const filename = settingsPayload().output_filename;
+  const fallbackHtml = () => {
+    if (canAssemblePreview(state.lastHtml)) return withLiveTheme(assemblePreviewHtml(state.lastHtml));
+    if (state.lastHtml) return withLiveTheme(state.lastHtml);
+    return "";
+  };
   try {
     const { res, data } = await postJson("/api/build", buildPayload(), BUILD_TIMEOUT_MS);
     if (!res.ok) {
-      if (state.lastHtml) {
-        await downloadTranslatedPack(withLiveTheme(state.lastHtml), filename);
-        setStatus("Downloaded the imported pack with your Design settings; rebuild timed out", "error");
+      const html = fallbackHtml();
+      if (html) {
+        await downloadTranslatedPack(html, filename);
+        setStatus("Downloaded a local assemble with your edits; server rebuild timed out", "error");
         return;
       }
       setStatus(data.error || "Download failed", "error");
       return;
     }
+    state.lastHtml = data.html;
+    state.useImportedPreview = false;
     await downloadTranslatedPack(data.html, data.filename || filename);
     setStatus("Downloaded " + (data.filename || filename), "ok");
   } catch (err) {
-    if (state.lastHtml) {
-      await downloadTranslatedPack(withLiveTheme(state.lastHtml), filename);
-      setStatus("Downloaded the imported pack with your Design settings; rebuild timed out", "error");
+    const html = fallbackHtml();
+    if (html) {
+      await downloadTranslatedPack(html, filename);
+      setStatus("Downloaded a local assemble with your edits; server rebuild timed out", "error");
       return;
     }
     setStatus(err.message || "Download failed", "error");
